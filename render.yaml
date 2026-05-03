@@ -4,7 +4,11 @@ services:
     env: static
     staticPublishPath: .
     buildCommand: ""
+    pullRequestPreviewsEnabled: true
     headers:
       - path: /*
         name: Cache-Control
-        value: no-cache
+        value: no-store
+      - path: /*
+        name: X-Frame-Options
+        value: SAMEORIGIN
