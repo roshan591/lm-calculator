@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Last Mile Cost Calculator — Xindus</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet"/>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#f5f6f8;--surface:#ffffff;--surface2:#f0f2f5;--border:#e2e5ea;--border2:#d0d4db;
+  --text:#1a1d23;--text2:#5c6370;--text3:#8b919e;
+  --blue:#0077b6;--blue-bg:#e8f4fd;--teal:#0f766e;--teal-bg:#e6f7f6;
+  --green:#166534;--green-bg:#dcfce7;--orange:#b45309;--orange-bg:#fef3c7;
+  --red:#dc2626;--red-bg:#fee2e2;--purple:#6d28d9;--purple-bg:#ede9fe;
+  --font:'IBM Plex Sans',system-ui,sans-serif;--mono:'IBM Plex Mono',monospace;
+  --radius:8px;--radius-lg:12px;--shadow:0 1px 3px rgba(0,0,0,.08),0 1px 2px rgba(0,0,0,.06);
+}
+body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:14px;line-height:1.5}
+input,select,button{font-family:var(--font)}
+/* LAYOUT */
+.app{display:grid;grid-template-rows:56px 1fr;min-height:100vh}
+.header{background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 24px;gap:16px}
+.header-logo{display:flex;align-items:center;gap:10px}
+.header-logo svg{color:var(--blue)}
+.header-title{font-size:16px;font-weight:600;letter-spacing:-.3px}
+.header-sub{font-size:12px;color:var(--text2);padding:3px 8px;background:var(--surface2);border-radius:20px;border:1px solid var(--border)}
+.main{display:grid;grid-template-columns:200px 1fr;height:calc(100vh - 56px)}
+.sidebar{background:var(--surface);border-right:1px solid var(--border);padding:16px 0;overflow-y:auto}
+.sidebar-section{padding:8px 16px 4px;font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.6px}
+.nav-item{display:flex;align-items:center;gap:10px;padding:8px 16px;cursor:pointer;border-radius:0;font-size:13px;color:var(--text2);transition:all .12s;border-left:3px solid transparent}
+.nav-item:hover{background:var(--surface2);color:var(--text)}
+.nav-item.active{background:var(--blue-bg);color:var(--blue);border-left-color:var(--blue);font-weight:500}
+.nav-item svg{width:16px;height:16px;flex-shrink:0}
+.content{padding:24px;overflow-y:auto;background:var(--bg)}
+/* CARDS */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:20px;margin-bottom:16px;box-shadow:var(--shadow)}
+.card-title{font-size:14px;font-weight:600;margin-bottom:12px;color:var(--text)}
+.card-sub{font-size:12px;color:var(--text2);margin-bottom:16px}
+/* METRIC CARDS */
+.metric-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:20px}
+.metric-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;box-shadow:var(--shadow)}
+.metric-label{font-size:11px;color:var(--text2);margin-bottom:4px;font-weight:500;text-transform:uppercase;letter-spacing:.4px}
+.metric-value{font-size:24px;font-weight:600;font-family:var(--mono);color:var(--text)}
+.metric-value.green{color:var(--teal)}
+/* BUTTONS */
+.btn{padding:7px 16px;border-radius:var(--radius);border:1px solid var(--border2);background:var(--surface);font-size:13px;font-weight:500;cursor:pointer;color:var(--text);transition:all .12s;display:inline-flex;align-items:center;gap:6px}
+.btn:hover{background:var(--surface2)}
+.btn-primary{background:var(--blue);border-color:var(--blue);color:#fff}
+.btn-primary:hover{background:#005f92;border-color:#005f92}
+.btn-sm{padding:5px 12px;font-size:12px}
+/* FORM */
+.form-group{margin-bottom:14px}
+.form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px}
+label.lbl{display:block;font-size:12px;font-weight:500;color:var(--text2);margin-bottom:4px}
+input.inp,select.inp{width:100%;padding:8px 10px;border:1px solid var(--border2);border-radius:var(--radius);font-size:13px;color:var(--text);background:var(--surface);outline:none;transition:border .12s}
+input.inp:focus,select.inp:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(0,119,182,.1)}
+/* TABLE */
+.tbl-wrap{overflow-x:auto;border-radius:var(--radius-lg);border:1px solid var(--border);background:var(--surface)}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{padding:9px 12px;text-align:left;font-weight:600;font-size:11px;color:var(--text2);background:var(--surface2);border-bottom:1px solid var(--border);white-space:nowrap;position:sticky;top:0}
+td{padding:8px 12px;border-bottom:1px solid var(--border);vertical-align:middle}
+tr:last-child td{border-bottom:0}
+tr:hover td{background:rgba(0,0,0,.015)}
+td.mono{font-family:var(--mono);font-size:12px}
+/* BADGE */
+.badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600}
+.badge-blue{background:var(--blue-bg);color:var(--blue)}
+.badge-teal{background:var(--teal-bg);color:var(--teal)}
+.badge-green{background:var(--green-bg);color:var(--green)}
+.badge-orange{background:var(--orange-bg);color:var(--orange)}
+.badge-red{background:var(--red-bg);color:var(--red)}
+.badge-gray{background:var(--surface2);color:var(--text2)}
+.badge-purple{background:var(--purple-bg);color:var(--purple)}
+/* UPLOAD ZONE */
+.upload-zone{border:2px dashed var(--border2);border-radius:var(--radius-lg);padding:32px;text-align:center;cursor:pointer;transition:all .15s;background:var(--surface)}
+.upload-zone:hover,.upload-zone.drag{border-color:var(--blue);background:var(--blue-bg)}
+.upload-zone-icon{width:40px;height:40px;margin:0 auto 10px;color:var(--text3)}
+.upload-zone-label{font-size:14px;font-weight:500;color:var(--text);margin-bottom:4px}
+.upload-zone-hint{font-size:12px;color:var(--text2)}
+/* STATUS */
+.toast{padding:10px 14px;border-radius:var(--radius);font-size:13px;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.toast-success{background:var(--green-bg);color:var(--green)}
+.toast-error{background:var(--red-bg);color:var(--red)}
+/* TOGGLE */
+.tab-pills{display:flex;gap:4px;background:var(--surface2);border-radius:var(--radius);padding:3px;border:1px solid var(--border);width:fit-content;margin-bottom:16px}
+.tab-pill{padding:6px 14px;border-radius:6px;font-size:12px;font-weight:500;border:none;background:transparent;cursor:pointer;color:var(--text2);transition:all .12s}
+.tab-pill.active{background:var(--surface);color:var(--text);box-shadow:0 1px 3px rgba(0,0,0,.1)}
+/* CARRIER COLORS */
+.c-usps-ga{background:#e8f4fd;color:#0077b6}
+.c-usps-pm{background:#e0f7fa;color:#0097a7}
+.c-uniuni{background:#e6f7f6;color:#0f766e}
+.c-ups{background:#fff3e0;color:#e65100}
+/* CHOSEN CELL */
+.chosen-cell{background:#e6f7f6;font-weight:600;color:var(--teal)}
+/* RULES TABLE */
+.rules-carrier-header{display:flex;align-items:center;gap:8px;padding:10px 0 6px;border-bottom:1px solid var(--border);margin-bottom:10px}
+.carrier-dot{width:10px;height:10px;border-radius:50%}
+/* RESPONSIVE */
+@media(max-width:768px){.main{grid-template-columns:1fr}.sidebar{display:none}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="header">
+    <div class="header-logo">
+      <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+        <rect width="28" height="28" rx="6" fill="#0077B6"/>
+        <path d="M7 14h14M14 7l7 7-7 7" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span class="header-title">Last Mile Calculator</span>
+    </div>
+    <span class="header-sub">Xindus Trade Networks</span>
+  </header>
+  <div class="main">
+    <nav class="sidebar">
+      <div class="sidebar-section">Operations</div>
+      <div class="nav-item active" data-tab="calculator" onclick="switchTab(this,'calculator')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><path d="M14 17h6M17 14v6"/></svg>
+        Calculator
+      </div>
+      <div class="nav-item" data-tab="analysis" onclick="switchTab(this,'analysis')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        Rate Analysis
+      </div>
+      <div class="sidebar-section">Configuration</div>
+      <div class="nav-item" data-tab="rates" onclick="switchTab(this,'rates')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+        Rate Cards
+      </div>
+      <div class="nav-item" data-tab="rules" onclick="switchTab(this,'rules')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+        Rules & Surcharges
+      </div>
+      <div class="nav-item" data-tab="zones" onclick="switchTab(this,'zones')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 010 20M12 2a15.3 15.3 0 000 20"/></svg>
+        Zone Mapping
+      </div>
+    </nav>
+    <main class="content">
+      <div id="tab-calculator" class="tab-content"></div>
+      <div id="tab-analysis" class="tab-content" style="display:none"></div>
+      <div id="tab-rates" class="tab-content" style="display:none"></div>
+      <div id="tab-rules" class="tab-content" style="display:none"></div>
+      <div id="tab-zones" class="tab-content" style="display:none"></div>
+    </main>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+// ═══════════════════════════════════════════════════
+// RATE DATA (embedded from template)
+// ═══════════════════════════════════════════════════
+const RATE_DATA = {"USPS_GA":{"oz":{"1":{"1":3.74,"2":3.74,"3":3.74,"4":3.74,"5":4.09,"6":4.09,"7":4.09,"8":4.09,"9":4.63,"10":4.63,"11":4.63,"12":4.63,"13":5.57,"14":5.57,"15":5.57,"16":5.57},"2":{"1":3.79,"2":3.79,"3":3.79,"4":3.79,"5":4.14,"6":4.14,"7":4.14,"8":4.14,"9":4.7,"10":4.7,"11":4.7,"12":4.7,"13":5.63,"14":5.63,"15":5.63,"16":5.63},"3":{"1":3.81,"2":3.81,"3":3.81,"4":3.81,"5":4.18,"6":4.18,"7":4.18,"8":4.18,"9":4.76,"10":4.76,"11":4.76,"12":4.76,"13":5.74,"14":5.74,"15":5.74,"16":5.74},"4":{"1":3.86,"2":3.86,"3":3.86,"4":3.86,"5":4.24,"6":4.24,"7":4.24,"8":4.24,"9":4.82,"10":4.82,"11":4.82,"12":4.82,"13":5.82,"14":5.82,"15":5.82,"16":5.82},"5":{"1":3.91,"2":3.91,"3":3.91,"4":3.91,"5":4.29,"6":4.29,"7":4.29,"8":4.29,"9":4.88,"10":4.88,"11":4.88,"12":4.88,"13":5.89,"14":5.89,"15":5.89,"16":5.89},"6":{"1":4.03,"2":4.03,"3":4.03,"4":4.03,"5":4.43,"6":4.43,"7":4.43,"8":4.43,"9":5.02,"10":5.02,"11":5.02,"12":5.02,"13":6.07,"14":6.07,"15":6.07,"16":6.07},"7":{"1":4.2,"2":4.2,"3":4.2,"4":4.2,"5":4.6,"6":4.6,"7":4.6,"8":4.6,"9":5.21,"10":5.21,"11":5.21,"12":5.21,"13":6.29,"14":6.29,"15":6.29,"16":6.29},"8":{"1":4.27,"2":4.27,"3":4.27,"4":4.27,"5":4.68,"6":4.68,"7":4.68,"8":4.68,"9":5.59,"10":5.59,"11":5.59,"12":5.59,"13":6.33,"14":6.33,"15":6.33,"16":6.33}},"lbs":{"1":{"1":5.57,"2":5.81,"3":6.14,"4":6.41,"5":6.55,"6":6.76,"7":6.89,"8":7.03,"9":7.23,"10":7.47,"11":8.07,"12":8.33,"13":8.58,"14":8.82,"15":9.03,"16":9.22,"17":9.4,"18":9.61,"19":9.81,"20":10.11,"25":10.11,"30":10.11,"35":11.0,"40":11.0,"45":11.99,"50":11.99,"55":12.99,"60":12.99,"65":13.99,"68":13.99},"2":{"1":5.63,"2":5.88,"3":6.2,"4":6.5,"5":6.64,"6":6.85,"7":6.98,"8":7.13,"9":7.32,"10":7.56,"11":8.17,"12":8.43,"13":8.68,"14":8.93,"15":9.13,"16":9.33,"17":9.51,"18":9.72,"19":9.92,"20":10.22,"25":10.22,"30":10.22},"3":{"1":5.74,"2":5.99,"3":6.33,"4":6.62,"5":6.76,"6":6.98,"7":7.11,"8":7.26,"9":7.46,"10":7.71,"11":8.32,"12":8.59,"13":8.85,"14":9.1,"15":9.31,"16":9.52,"17":9.7,"18":9.92,"19":10.13,"20":10.44,"25":10.44},"4":{"1":5.82,"2":6.08,"3":6.43,"4":6.72,"5":6.87,"6":7.09,"7":7.22,"8":7.37,"9":7.57,"10":7.82,"11":8.45,"12":8.72,"13":8.97,"14":9.23,"15":9.44,"16":9.65,"17":9.83,"18":10.05,"19":10.27,"20":10.58},"5":{"1":5.89,"2":6.15,"3":6.5,"4":6.81,"5":6.96,"6":7.18,"7":7.32,"8":7.47,"9":7.67,"10":7.92,"11":8.56,"12":8.83,"13":9.09,"14":9.35,"15":9.56,"16":9.77,"17":9.96,"18":10.18,"19":10.4,"20":10.72},"6":{"1":6.07,"2":6.34,"3":6.7,"4":7.01,"5":7.16,"6":7.39,"7":7.53,"8":7.68,"9":7.89,"10":8.15,"11":8.81,"12":9.09,"13":9.36,"14":9.63,"15":9.85,"16":10.07,"17":10.27,"18":10.5,"19":10.73,"20":11.06},"7":{"1":6.29,"2":6.57,"3":6.95,"4":7.27,"5":7.42,"6":7.66,"7":7.8,"8":7.96,"9":8.17,"10":8.44,"11":9.12,"12":9.41,"13":9.69,"14":9.97,"15":10.2,"16":10.43,"17":10.64,"18":10.87,"19":11.11,"20":11.45},"8":{"1":8.4,"2":9.21,"3":10.93,"4":12.18,"5":13.08,"6":14.26,"7":15.28,"8":16.15,"9":16.99,"10":17.86,"11":18.7,"12":19.46,"13":20.3,"14":21.16,"15":21.93,"16":22.65,"17":23.36,"18":24.09,"19":24.82,"20":25.73,"25":25.73,"29":28.0,"30":28.0}}},"USPS_PM":{"oz":{"1":{"1":6.42,"2":6.42,"3":6.42,"4":6.42,"5":6.42,"6":6.42,"7":6.42,"8":6.42,"9":6.55,"10":6.55,"11":6.55,"12":6.55,"13":6.55,"14":6.55,"15":6.55,"16":6.55},"2":{"1":6.53,"2":6.53,"3":6.53,"4":6.53,"5":6.53,"6":6.53,"7":6.53,"8":6.53,"9":6.67,"10":6.67,"11":6.67,"12":6.67,"13":6.67,"14":6.67,"15":6.67,"16":6.67},"3":{"1":6.62,"2":6.62,"3":6.62,"4":6.62,"5":6.62,"6":6.62,"7":6.62,"8":6.62,"9":6.76,"10":6.76,"11":6.76,"12":6.76,"13":6.76,"14":6.76,"15":6.76,"16":6.76},"4":{"1":6.67,"2":6.67,"3":6.67,"4":6.67,"5":6.67,"6":6.67,"7":6.67,"8":6.67,"9":6.81,"10":6.81,"11":6.81,"12":6.81,"13":6.81,"14":6.81,"15":6.81,"16":6.81},"5":{"1":6.72,"2":6.72,"3":6.72,"4":6.72,"5":6.72,"6":6.72,"7":6.72,"8":6.72,"9":6.86,"10":6.86,"11":6.86,"12":6.86,"13":6.86,"14":6.86,"15":6.86,"16":6.86},"6":{"1":7.11,"2":7.11,"3":7.11,"4":7.11,"5":7.11,"6":7.11,"7":7.11,"8":7.11,"9":7.25,"10":7.25,"11":7.25,"12":7.25,"13":7.25,"14":7.25,"15":7.25,"16":7.25},"7":{"1":7.84,"2":7.84,"3":7.84,"4":7.84,"5":7.84,"6":7.84,"7":7.84,"8":7.84,"9":7.98,"10":7.98,"11":7.98,"12":7.98,"13":7.98,"14":7.98,"15":7.98,"16":7.98},"8":{"1":9.2,"2":9.2,"3":9.2,"4":9.2,"5":9.2,"6":9.2,"7":9.2,"8":9.2,"9":9.2,"10":9.2,"11":9.2,"12":9.2,"13":9.2,"14":9.2,"15":9.2,"16":9.2}},"lbs":{"1":{"1":6.55,"2":6.68,"3":6.77,"4":6.86,"5":6.94,"6":7.44,"7":7.89,"8":8.34,"9":8.8,"10":9.35,"11":9.89,"12":10.44,"13":10.97,"14":11.51,"15":12.04,"16":12.59,"17":13.11,"18":13.65,"19":14.17,"20":14.71},"2":{"1":6.67,"2":6.81,"3":6.9,"4":6.99,"5":7.08,"6":7.59,"7":8.05,"8":8.51,"9":8.97,"10":9.53,"11":10.08,"12":10.63,"13":11.17,"14":11.72,"15":12.25,"16":12.81,"17":13.34,"18":13.89,"19":14.42,"20":14.97},"3":{"1":6.76,"2":6.9,"3":7.0,"4":7.1,"5":7.19,"6":7.71,"7":8.18,"8":8.64,"9":9.11,"10":9.67,"11":10.23,"12":10.78,"13":11.33,"14":11.88,"15":12.42,"16":12.97,"17":13.51,"18":14.07,"19":14.61,"20":15.16},"4":{"1":6.81,"2":6.95,"3":7.05,"4":7.16,"5":7.25,"6":7.77,"7":8.25,"8":8.72,"9":9.19,"10":9.75,"11":10.31,"12":10.87,"13":11.41,"14":11.96,"15":12.5,"16":13.06,"17":13.6,"18":14.16,"19":14.7,"20":15.26},"5":{"1":6.86,"2":7.0,"3":7.11,"4":7.22,"5":7.31,"6":7.84,"7":8.32,"8":8.8,"9":9.27,"10":9.84,"11":10.4,"12":10.96,"13":11.51,"14":12.07,"15":12.61,"16":13.17,"17":13.72,"18":14.28,"19":14.83,"20":15.39},"6":{"1":7.25,"2":7.4,"3":7.52,"4":7.64,"5":7.75,"6":8.31,"7":8.82,"8":9.33,"9":9.84,"10":10.44,"11":11.04,"12":11.64,"13":12.24,"14":12.85,"15":13.44,"16":14.05,"17":14.63,"18":15.24,"19":15.83,"20":16.44},"7":{"1":7.98,"2":8.15,"3":8.28,"4":8.42,"5":8.55,"6":9.15,"7":9.72,"8":10.29,"9":10.86,"10":11.52,"11":12.17,"12":12.83,"13":13.48,"14":14.14,"15":14.79,"16":15.46,"17":16.1,"18":16.77,"19":17.41,"20":18.08},"8":{"1":9.75,"2":12.89,"3":17.26,"4":19.78,"5":22.42,"6":25.14,"7":27.33,"8":29.52,"9":31.7,"10":33.88,"11":36.07,"12":38.26,"13":40.44,"14":42.64,"15":44.82,"16":47.02,"17":49.2,"18":51.4,"19":53.58,"20":55.78}}},"UNIUNI":{"oz":{"1":{"1":2.47,"2":2.47,"3":2.47,"4":2.47,"5":2.58,"6":2.58,"7":2.58,"8":2.58,"9":2.65,"10":2.65,"11":2.65,"12":2.7,"13":2.75,"14":2.75,"15":2.75,"16":2.75},"2":{"1":2.5,"2":2.5,"3":2.5,"4":2.5,"5":2.62,"6":2.62,"7":2.62,"8":2.62,"9":2.69,"10":2.69,"11":2.69,"12":2.74,"13":2.79,"14":2.79,"15":2.79,"16":2.79},"3":{"1":2.54,"2":2.54,"3":2.54,"4":2.54,"5":2.66,"6":2.66,"7":2.66,"8":2.66,"9":2.73,"10":2.73,"11":2.73,"12":2.78,"13":2.84,"14":2.84,"15":2.84,"16":2.84},"4":{"1":2.57,"2":2.57,"3":2.57,"4":2.57,"5":2.7,"6":2.7,"7":2.7,"8":2.7,"9":2.77,"10":2.77,"11":2.77,"12":2.83,"13":2.88,"14":2.88,"15":2.88,"16":2.88},"5":{"1":2.61,"2":2.61,"3":2.61,"4":2.61,"5":2.74,"6":2.74,"7":2.74,"8":2.74,"9":2.81,"10":2.81,"11":2.81,"12":2.87,"13":2.93,"14":2.93,"15":2.93,"16":2.93},"6":{"1":2.9,"2":2.9,"3":2.9,"4":2.9,"5":3.05,"6":3.05,"7":3.05,"8":3.05,"9":3.13,"10":3.13,"11":3.13,"12":3.19,"13":3.25,"14":3.25,"15":3.25,"16":3.25},"7":{"1":3.06,"2":3.06,"3":3.06,"4":3.06,"5":3.22,"6":3.22,"7":3.22,"8":3.22,"9":3.3,"10":3.3,"11":3.3,"12":3.37,"13":3.43,"14":3.43,"15":3.43,"16":3.43},"8":{"1":3.34,"2":3.34,"3":3.34,"4":3.71,"5":3.71,"6":3.71,"7":3.71,"8":4.1,"9":4.1,"10":4.1,"11":4.1,"12":4.1,"13":4.4,"14":4.4,"15":4.4,"16":4.4}},"lbs":{"1":{"1":2.79,"2":2.94,"3":2.94,"4":2.94,"5":3.08,"6":3.08,"7":3.08,"8":3.08,"9":3.21,"10":3.21,"11":3.21,"12":3.21,"13":3.42,"14":3.42,"15":3.42,"16":3.42,"17":3.77,"18":3.77,"19":3.77,"20":3.77},"2":{"1":2.83,"2":2.98,"3":2.98,"5":3.12,"9":3.26,"13":3.47,"16":3.47},"3":{"1":2.88,"2":3.03,"3":3.03,"5":3.17,"9":3.31,"13":3.52,"16":3.52},"4":{"1":2.93,"2":3.08,"3":3.08,"5":3.23,"9":3.37,"13":3.59,"16":3.59},"5":{"1":2.98,"2":3.13,"3":3.13,"5":3.28,"9":3.43,"13":3.65,"16":3.65},"6":{"1":3.31,"2":3.48,"3":3.48,"5":3.65,"9":3.81,"13":4.06,"16":4.06},"7":{"1":3.49,"2":3.67,"3":3.67,"5":3.85,"9":4.02,"13":4.28,"16":4.28},"8":{"1":5.06,"2":5.06,"3":5.06,"4":5.25,"5":5.25,"6":6.0,"7":6.0,"8":6.0,"9":6.29,"13":6.68,"15":6.68}}},"UPS":{"oz":{},"lbs":{"2":{"1":6.9,"10":6.9,"20":6.9,"25":7.01,"30":7.81,"40":8.84,"50":9.65,"60":10.15,"70":11.39,"80":14.96,"90":20.63,"100":23.99,"110":28.01,"120":30.99,"130":33.24,"140":36.98,"150":39.01},"3":{"1":6.9,"10":6.9,"20":7.45,"25":8.14,"30":9.21,"40":10.73,"50":11.95,"60":12.57,"70":14.55,"80":17.3,"90":21.52,"100":24.22,"110":28.55,"120":31.45,"130":33.74,"140":37.68,"150":40.51},"4":{"1":6.9,"10":6.9,"20":7.61,"25":8.68,"30":10.09,"40":12.22,"50":14.24,"60":14.71,"70":16.8,"80":18.72,"90":23.52,"100":26.19,"110":29.44,"120":32.73,"130":35.54,"140":39.45,"150":42.71},"5":{"1":6.9,"10":7.1,"20":9.37,"25":10.4,"30":12.11,"40":14.65,"50":17.32,"60":18.77,"70":20.68,"80":22.68,"90":26.11,"100":28.43,"110":31.47,"120":34.18,"130":36.51,"140":40.19,"150":43.92},"6":{"1":6.9,"10":7.36,"20":10.92,"25":12.81,"30":15.15,"40":18.31,"50":21.79,"60":22.51,"70":24.53,"80":27.57,"90":30.87,"100":33.53,"110":36.38,"120":39.17,"130":41.78,"140":45.18,"150":48.39},"7":{"1":6.9,"10":8.28,"20":13.31,"25":15.49,"30":17.63,"40":21.55,"50":26.33,"60":26.61,"70":27.98,"80":32.25,"90":36.05,"100":37.12,"110":40.39,"120":43.22,"130":46.14,"140":49.56,"150":52.28},"8":{"1":6.9,"10":9.13,"20":15.04,"25":17.79,"30":20.91,"40":25.02,"50":29.47,"60":31.91,"70":33.67,"80":34.73,"90":38.27,"100":40.8,"110":44.58,"120":47.64,"130":52.83,"140":55.6,"150":58.78}}}};
+
+const RULES = {"USPS_GA":{volFactor:166,volThreshold:1728,maxWeight:70,oversize:{L1:{t:55,c:3},L2:{t:45,c:3},L3:{t:38,c:3}},overlength:{t:55,limit:76,c:4.5,lc:10},overvolume:{t:3456,c:21},marketplaces:['Amazon','Other','Ebay','Etsy','Amazon FBA','Tiktok','Alibris','Walmart','FAIRE'],poAddress:true},"USPS_PM":{volFactor:166,volThreshold:1728,maxWeight:40,oversize:{L1:{t:55,c:3},L2:{t:45,c:3},L3:{t:38,c:3}},overlength:{t:55,limit:76,c:4.5,lc:21},overvolume:{t:3456,c:35},marketplaces:['Amazon','Other','Ebay','Etsy','Amazon FBA','Tiktok','Alibris','Walmart'],poAddress:true},"UNIUNI":{volFactor:194,volThreshold:0,maxWeight:30,maxLongestInch:20,maxCubicIn:1728,marketplaces:['Amazon','Other','Tiktok','Alibris','Walmart'],poAddress:false},"UPS":{volFactor:225,volThreshold:0,maxWeight:150,rsc:{c:3.35},overweight:{t:50},overdimension:{L1:121,L2:76,LG:266},largePackage:{L1:243,LG:330},unauthorized:{LG:274,w:149},fuelSurcharge:0.1803,packaging:{L1:45.72,L2:33.02},das:{c:3.18},marketplaces:['Amazon','Other','Ebay','Etsy','Amazon FBA','Tiktok','Alibris','Walmart','FAIRE'],poAddress:false}};
+
+const CARRIERS = [
+  {key:'USPS_GA', label:'USPS Ground Advantage', color:'#0077b6', cls:'c-usps-ga'},
+  {key:'USPS_PM', label:'USPS Priority Mail',    color:'#0097a7', cls:'c-usps-pm'},
+  {key:'UNIUNI',  label:'UniUni Ground',          color:'#0f766e', cls:'c-uniuni'},
+  {key:'UPS',     label:'UPS Ground',             color:'#e65100', cls:'c-ups'},
+];
+
+// State
+let state = {
+  shipments: [], results: [], zoneMap: {uniuni:{}, usps:{}},
+  rateData: JSON.parse(JSON.stringify(RATE_DATA)),
+  msg: ''
+};
+
+// ═══════ ENGINE ═══════
+function uspsZone(z){const p=parseInt(String(z).padStart(5,'0').slice(0,3));if(p<=119||(p>=180&&p<=191))return 2;if((p>=120&&p<=149)||(p>=192&&p<=269))return 3;if((p>=150&&p<=179)||(p>=270&&p<=289)||(p>=430&&p<=499)||(p>=530&&p<=549))return 4;if((p>=290&&p<=349)||(p>=400&&p<=429)||(p>=500&&p<=529)||(p>=550&&p<=599)||(p>=600&&p<=629)||(p>=460&&p<=479))return 5;if((p>=350&&p<=399)||(p>=630&&p<=693)||(p>=700&&p<=729))return 6;if((p>=730&&p<=799)||(p>=570&&p<=589)||(p>=800&&p<=816)||(p>=820&&p<=839)||(p>=870&&p<=888))return 7;return 8;}
+
+function getRate(rd,svc,zone,wt,unit){const t=rd[svc];if(!t)return null;const z=String(zone);if(unit==='OZ'){const oz=t.oz?.[z];if(oz)return oz[String(Math.min(Math.ceil(wt),16))]??null;}const lb=t.lbs?.[z];if(!lb)return null;const keys=Object.keys(lb).map(Number).sort((a,b)=>a-b);const k=keys.filter(k=>k<=Math.ceil(wt));return k.length?lb[String(k[k.length-1])]:null;}
+
+function isMpSvc(rules,carrier,mp){const svc=rules[carrier];if(!svc)return false;const m=(mp||'').toLowerCase();const mps=svc.marketplaces.map(x=>x.toLowerCase());if(mps.includes(m))return true;if(m==='etsy_usa'&&mps.includes('etsy'))return true;if(carrier==='UNIUNI'&&m==='amazon fba'&&mps.includes('amazon'))return true;if(mps.includes('other'))return true;return false;}
+
+function calcCost(box,carrier){
+  const svc=RULES[carrier];if(!svc)return{ok:false,reason:'Unknown carrier'};
+  const{grossKg,L_cm,W_cm,H_cm,postal,marketplace,isPO}=box;
+  const gLbs=grossKg*2.20462;const Li=L_cm/2.54,Wi=W_cm/2.54,Hi=H_cm/2.54;
+  const vCin=Li*Wi*Hi;const sides=[L_cm,W_cm,H_cm].sort((a,b)=>b-a);
+  const lgCm=sides[0]+2*(sides[1]+sides[2]);
+  if(!isMpSvc(RULES,carrier,marketplace))return{ok:false,reason:'MP not serviceable'};
+  if(isPO&&!svc.poAddress)return{ok:false,reason:'PO Box not serviceable'};
+  let zone;
+  if(carrier==='UNIUNI'){const zk=String(postal).padStart(5,'0');zone=state.zoneMap.uniuni[zk]??null;if(!zone)return{ok:false,reason:'ZIP not in UniUni coverage'};}
+  else zone=uspsZone(postal);
+  if(carrier==='UNIUNI'){if(gLbs>svc.maxWeight)return{ok:false,reason:'Exceeds 30lb limit'};if(sides[0]/2.54>svc.maxLongestInch)return{ok:false,reason:'Longest side > 20in'};if(vCin>svc.maxCubicIn)return{ok:false,reason:'Volume > 1728 cu.in'};}
+  const volLbs=(carrier==='UNIUNI'||vCin>svc.volThreshold)?vCin/svc.volFactor:0;
+  const chgLbs=Math.max(gLbs,volLbs);
+  if(chgLbs>(svc.maxWeight||150))return{ok:false,reason:`Weight ${chgLbs.toFixed(1)}lbs > max`};
+  const isOz=(carrier!=='UPS')&&chgLbs<1.0;
+  const base=getRate(state.rateData,carrier,zone,isOz?chgLbs*16:chgLbs,isOz?'OZ':'LBS');
+  if(base==null)return{ok:false,reason:`No rate: ${chgLbs.toFixed(2)}lbs z${zone}`};
+  const sur=[];
+  if(carrier==='USPS_GA'||carrier==='USPS_PM'){const os=svc.oversize;if(sides[0]>os.L1.t)sur.push({n:'Oversize L1',a:os.L1.c});if(sides[1]>os.L2.t)sur.push({n:'Oversize L2',a:os.L2.c});if(sides[2]>os.L3.t)sur.push({n:'Oversize L3',a:os.L3.c});const ol=svc.overlength;if(sides[0]>ol.t&&sides[0]<=ol.limit)sur.push({n:'Overlength',a:ol.c});if(sides[0]>ol.limit)sur.push({n:'OverlengthLimit',a:ol.lc});if(vCin>svc.overvolume.t)sur.push({n:'Overvolume',a:svc.overvolume.c});}
+  if(carrier==='UPS'){if(grossKg<10)sur.push({n:'Residential',a:svc.rsc.c});if(gLbs>svc.overweight.t)sur.push({n:'Overweight',a:0,note:'Region-based'});if(sides[0]>svc.overdimension.L1||sides[1]>svc.overdimension.L2||lgCm>svc.overdimension.LG)sur.push({n:'Overdimension',a:0,note:'Region-based'});if(sides[0]>svc.largePackage.L1||lgCm>svc.largePackage.LG)sur.push({n:'Large Package',a:0});if(sides[0]>svc.packaging.L1||sides[1]>svc.packaging.L2)sur.push({n:'Packaging',a:0,note:'Region-based'});const sub=base+sur.reduce((s,x)=>s+(x.a||0),0);sur.push({n:'Fuel (18.03%)',a:+(sub*svc.fuelSurcharge).toFixed(2)});}
+  const surT=sur.reduce((s,x)=>s+(x.a||0),0);
+  return{ok:true,carrier,zone,chgLbs:+chgLbs.toFixed(4),volLbs:+volLbs.toFixed(4),unit:isOz?'OZ':'LBS',base,sur,surT:+surT.toFixed(2),total:+(base+surT).toFixed(2)};
+}
+
+function runCalc(src){
+  return src.map(box=>{
+    const costs=CARRIERS.map(c=>calcCost(box,c.key));
+    const el=costs.filter(c=>c.ok);
+    const cheapest=el.length?el.reduce((a,b)=>a.total<b.total?a:b):null;
+    return{box,costs,cheapest};
+  });
+}
+
+// ═══════ EXCEL PARSING ═══════
+function parseXlsx(buf,hint){
+  const wb=XLSX.read(buf,{type:'array',cellDates:true});
+  const name=hint?wb.SheetNames.find(n=>n.toLowerCase().includes(hint.toLowerCase()))||wb.SheetNames[0]:wb.SheetNames[0];
+  return XLSX.utils.sheet_to_json(wb.Sheets[name],{defval:null});
+}
+
+function mapRow(row){
+  const g=names=>{for(const n of names){const k=Object.keys(row).find(k=>k.toLowerCase().trim()===n);if(k&&row[k]!=null)return row[k];}return null;};
+  return{
+    awb:String(g(['awb','tracking'])||''),
+    boxId:String(g(['boxes','box_id','box id'])||''),
+    grossKg:parseFloat(g(['gross weight','grossweight','gross_weight'])||0),
+    L_cm:parseFloat(g(['length','l cm','l_cm'])||0),
+    W_cm:parseFloat(g(['width','w cm','w_cm'])||0),
+    H_cm:parseFloat(g(['height','h cm','h_cm'])||0),
+    postal:String(g(['reciever postal code','postal code','zip','zipcode','receiver postal code'])||'').replace(/[^0-9]/g,'').padStart(5,'0'),
+    marketplace:String(g(['market_place','marketplace','market place'])||''),
+    isPO:String(g(['is po address','is_po_address'])||'no').toLowerCase()==='yes'
+  };
+}
+
+// ═══════ HELPERS ═══════
+function badge(cls,text){return`<span class="badge ${cls}">${text}</span>`;}
+function carrierBadge(key){const c=CARRIERS.find(x=>x.key===key);return c?badge(c.cls,c.label):badge('badge-gray','Unknown');}
+function $$(sel){return document.querySelectorAll(sel);}
+function $(sel){return document.querySelector(sel);}
+function show(msg,type='success'){state.msg={text:msg,type};const el=$('#toast');if(el){el.className=`toast toast-${type}`;el.textContent=msg;el.style.display='flex';setTimeout(()=>{el.style.display='none';},3000);}}
+
+function exportCSV(){
+  const rows=[['Box ID','Postal','Marketplace','Allocated Carrier','Total $','USPS GA $','USPS PM $','UniUni $','UPS $','Zone','Chg Wt (lbs)','Vol Wt (lbs)','Unit','Base Rate','Surcharge Total','Surcharges Applied']];
+  state.results.forEach(r=>{const g=k=>r.costs.find(c=>c.carrier===k);const a=r.cheapest;rows.push([r.box.boxId,r.box.postal,r.box.marketplace,a?CARRIERS.find(c=>c.key===a.carrier)?.label:'None',a?.total??'',g('USPS_GA')?.ok?g('USPS_GA').total:'N/A',g('USPS_PM')?.ok?g('USPS_PM').total:'N/A',g('UNIUNI')?.ok?g('UNIUNI').total:'N/A',g('UPS')?.ok?g('UPS').total:'N/A',a?.zone??'',a?.chgLbs??'',a?.volLbs??'',a?.unit??'',a?.base??'',a?.surT??'',a?.sur?.map(s=>`${s.n}$${s.a}`).join('|')??'']);});
+  const csv=rows.map(r=>r.map(v=>String(v).includes(',')?`"${v}"`:v).join(',')).join('\n');
+  const a=document.createElement('a');a.href='data:text/csv,'+encodeURIComponent(csv);a.download='lm_costing_'+new Date().toISOString().slice(0,10)+'.csv';a.click();
+}
+
+// ═══════ RENDER TABS ═══════
+
+function renderCalculator(){
+  const el=$('#tab-calculator');
+  const r=state.results;
+  const totalCost=r.filter(x=>x.cheapest).reduce((s,x)=>s+(x.cheapest.total||0),0);
+  const carriers=CARRIERS.map(c=>({...c,count:r.filter(x=>x.cheapest?.carrier===c.key).length}));
+
+  el.innerHTML=`
+    <div id="toast" class="toast" style="display:none"></div>
+    <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center">
+      <h2 style="font-size:18px;font-weight:600;flex:1">Cost Calculator</h2>
+      ${r.length>0?`<button class="btn btn-sm" onclick="exportCSV()">Export CSV</button>`:''}
+    </div>
+
+    <div class="card">
+      <div class="tab-pills" id="mode-pills">
+        <button class="tab-pill active" onclick="setMode('upload',this)">Upload Shipments</button>
+        <button class="tab-pill" onclick="setMode('manual',this)">Manual Entry</button>
+      </div>
+
+      <div id="mode-upload">
+        <div class="upload-zone" id="ship-drop" onclick="$('#ship-input').click()" ondragover="event.preventDefault();this.classList.add('drag')" ondragleave="this.classList.remove('drag')" ondrop="handleShipDrop(event)">
+          <div class="upload-zone-icon">
+            <svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M20 26V8m0 0l-6 6m6-6l6 6"/><path d="M4 28l1.3 5.2A2 2 0 007.2 35h25.6a2 2 0 001.9-1.8L36 28"/>
+            </svg>
+          </div>
+          <div class="upload-zone-label">Drop shipment file here or click to browse</div>
+          <div class="upload-zone-hint">Excel or CSV — matches Shipment Level Template format</div>
+        </div>
+        <input type="file" id="ship-input" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleShipFile(event)"/>
+        ${state.shipments.length>0?`<div style="margin-top:12px;font-size:13px;color:var(--text2)"><strong style="color:var(--teal)">${state.shipments.length}</strong> shipments loaded · First: ${state.shipments[0].awb||state.shipments[0].boxId}</div>`:''}
+      </div>
+
+      <div id="mode-manual" style="display:none">
+        <div class="form-grid">
+          <div class="form-group"><label class="lbl">Gross Weight (kg)</label><input class="inp" id="m-gw" value="0.5" type="number" step="0.01"/></div>
+          <div class="form-group"><label class="lbl">Length (cm)</label><input class="inp" id="m-l" value="30" type="number"/></div>
+          <div class="form-group"><label class="lbl">Width (cm)</label><input class="inp" id="m-w" value="20" type="number"/></div>
+          <div class="form-group"><label class="lbl">Height (cm)</label><input class="inp" id="m-h" value="10" type="number"/></div>
+          <div class="form-group"><label class="lbl">Postal Code</label><input class="inp" id="m-zip" value="95405"/></div>
+          <div class="form-group"><label class="lbl">Marketplace</label>
+            <select class="inp" id="m-mp">
+              <option>Amazon</option><option>Walmart</option><option>Etsy</option><option>eBay</option>
+              <option>Amazon FBA</option><option>Tiktok</option><option>FAIRE</option><option>Other</option>
+            </select>
+          </div>
+        </div>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer"><input type="checkbox" id="m-po"/> PO Box address</label>
+      </div>
+    </div>
+
+    <button class="btn btn-primary" onclick="runCalcUI()" id="calc-btn" style="margin-bottom:20px">
+      Calculate Costs${state.shipments.length>0?' ('+state.shipments.length+' boxes)':''}
+    </button>
+
+    ${r.length>0?`
+    <div class="metric-grid">
+      <div class="metric-card"><div class="metric-label">Boxes Processed</div><div class="metric-value">${r.length}</div></div>
+      <div class="metric-card"><div class="metric-label">Allocated</div><div class="metric-value">${r.filter(x=>x.cheapest).length}</div></div>
+      <div class="metric-card"><div class="metric-label">Total Cost</div><div class="metric-value">$${totalCost.toFixed(2)}</div></div>
+      <div class="metric-card"><div class="metric-label">Avg Cost/Box</div><div class="metric-value">$${r.filter(x=>x.cheapest).length?( totalCost/r.filter(x=>x.cheapest).length).toFixed(2):'-'}</div></div>
+      ${carriers.map(c=>`<div class="metric-card"><div class="metric-label" style="color:${c.color}">${c.label.replace('USPS ','').replace(' Ground','')}</div><div class="metric-value" style="color:${c.color}">${c.count}</div></div>`).join('')}
+    </div>
+
+    <div class="tbl-wrap" style="max-height:500px;overflow-y:auto">
+      <table>
+        <thead><tr>
+          <th>Box ID</th><th>AWB</th><th>Postal</th><th>Marketplace</th>
+          <th>Allocated Carrier</th><th>Cost $</th>
+          <th>USPS GA</th><th>USPS PM</th><th>UniUni</th><th>UPS</th>
+          <th>Zone</th><th>Chg Wt (lbs)</th><th>Unit</th><th>Surcharges</th>
+        </tr></thead>
+        <tbody>
+          ${r.map((row,i)=>{
+            const g=k=>row.costs.find(c=>c.carrier===k);
+            const a=row.cheapest;const C=a?CARRIERS.find(c=>c.key===a.carrier):null;
+            const bg=i%2?'':'';
+            return`<tr>
+              <td class="mono">${row.box.boxId||'-'}</td>
+              <td class="mono" style="max-width:120px;overflow:hidden;text-overflow:ellipsis">${row.box.awb||'-'}</td>
+              <td class="mono">${row.box.postal}</td>
+              <td>${badge('badge-gray',row.box.marketplace||'-')}</td>
+              <td>${C?badge(C.cls,C.label):badge('badge-red','No carrier')}</td>
+              <td class="mono" style="font-weight:600">${a?'$'+a.total.toFixed(2):'-'}</td>
+              ${CARRIERS.map(c=>{const x=g(c.key);const isC=a?.carrier===c.key;return`<td class="mono${isC?' chosen-cell':''}">${x?.ok?'$'+x.total.toFixed(2):`<span style="color:var(--text3);font-size:11px">${x?.reason?.slice(0,22)||'-'}</span>`}</td>`;}).join('')}
+              <td class="mono">${a?.zone??'-'}</td>
+              <td class="mono">${a?a.chgLbs.toFixed(3):'-'}</td>
+              <td>${a?badge(a.unit==='OZ'?'badge-orange':'badge-blue',a.unit):'-'}</td>
+              <td style="font-size:11px;color:var(--text2)">${a?.sur?.filter(s=>s.a>0).map(s=>s.n).join(', ')||'-'}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>`:''}
+  `;
+}
+
+function renderRates(){
+  const el=$('#tab-rates');
+  const svc=window._rateFilter||'USPS_GA';
+  const zone=window._rateZone||'8';
+  const t=state.rateData[svc];
+  const zones=Object.keys(t?.lbs||t?.oz||{}).sort((a,b)=>+a-+b);
+  const rows=[...Object.entries(t?.oz?.[zone]||{}).map(([w,r])=>({w:+w,u:'OZ',r})),...Object.entries(t?.lbs?.[zone]||{}).map(([w,r])=>({w:+w,u:'LBS',r}))].sort((a,b)=>a.u==='OZ'&&b.u==='LBS'?-1:a.u==='LBS'&&b.u==='OZ'?1:a.w-b.w);
+
+  el.innerHTML=`
+    <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center"><h2 style="font-size:18px;font-weight:600;flex:1">Rate Cards</h2></div>
+    <div class="card">
+      <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:16px">
+        <div class="form-group" style="margin:0"><label class="lbl">Service</label>
+          <select class="inp" style="width:230px" onchange="window._rateFilter=this.value;renderRates()">
+            ${CARRIERS.map(c=>`<option value="${c.key}"${c.key===svc?' selected':''}>${c.label}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group" style="margin:0"><label class="lbl">Zone</label>
+          <select class="inp" style="width:90px" onchange="window._rateZone=this.value;renderRates()">
+            ${zones.map(z=>`<option value="${z}"${z===zone?' selected':''}>Zone ${z}</option>`).join('')}
+          </select>
+        </div>
+        <div style="margin-left:auto">
+          <div class="upload-zone" style="padding:12px 20px;text-align:left;display:flex;align-items:center;gap:12px" onclick="$('#rate-input').click()">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            <div><div style="font-size:13px;font-weight:500">Upload Rate Card</div><div style="font-size:11px;color:var(--text2)">Base rate card template format</div></div>
+          </div>
+          <input type="file" id="rate-input" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleRateFile(event)"/>
+        </div>
+      </div>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:10px">${rows.length} rate entries for Zone ${zone} · ${CARRIERS.find(c=>c.key===svc)?.label}</div>
+      <div style="max-height:420px;overflow-y:auto">
+        <table>
+          <thead><tr><th>Weight</th><th>Unit</th><th>Rate (USD)</th></tr></thead>
+          <tbody>
+            ${rows.map((r,i)=>`<tr style="${i%2?'background:var(--surface2)':''}"><td class="mono">${r.w}</td><td>${badge(r.u==='OZ'?'badge-orange':'badge-blue',r.u)}</td><td class="mono" style="font-weight:600">$${r.r.toFixed(2)}</td></tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function renderRules(){
+  const el=$('#tab-rules');
+  const rulesRows={
+    USPS_GA:[['Vol Factor','166 cu.in/lb'],['Vol Threshold','1,728 cu.in (1 cu.ft) — below this, no vol weight'],['Max Weight','70 lbs'],['Oversize L1','>55cm → +$3.00'],['Oversize L2','>45cm → +$3.00'],['Oversize L3','>38cm → +$3.00'],['Overlength','55–76cm → +$4.50 | >76cm → +$10.00'],['Overvolume','>3,456 cu.in → +$21.00'],['Serviceable MPs','Amazon, Other, Ebay, Etsy, Amazon FBA, Tiktok, Alibris, Walmart, FAIRE'],['PO Box','Yes']],
+    USPS_PM:[['Vol Factor','166 cu.in/lb'],['Vol Threshold','1,728 cu.in (1 cu.ft)'],['Max Weight','40 lbs'],['Oversize L1','>55cm → +$3.00'],['Oversize L2','>45cm → +$3.00'],['Oversize L3','>38cm → +$3.00'],['Overlength','55–76cm → +$4.50 | >76cm → +$21.00'],['Overvolume','>3,456 cu.in → +$35.00'],['Serviceable MPs','Amazon, Other, Ebay, Etsy, Amazon FBA, Tiktok, Alibris, Walmart'],['PO Box','Yes']],
+    UNIUNI:[['Vol Factor','194 cu.in/lb (always applied)'],['Max Weight','30 lbs'],['Max Longest Side','20 inches'],['Max Volume','1,728 cu.in'],['Serviceable MPs','Amazon, Other, Tiktok, Alibris, Walmart (Amazon FBA treated as Amazon)'],['PO Box','No']],
+    UPS:[['Vol Factor','225 cu.in/lb (always applied)'],['Max Weight','150 lbs'],['Residential Surcharge','$3.35 if gross weight < 10kg'],['Overweight','>50 lbs → region-based surcharge (REGION_RATE_LOOKUP)'],['Overdimension','L1 > 121cm OR L2 > 76cm OR L+G > 266cm → region-based'],['Large Package','L1 > 243cm OR L+G > 330cm → region-based'],['Unauthorized','L+G > 274cm OR > 149 lbs → region-based'],['Fuel Surcharge','18.03% applied on base + fixed surcharges'],['DAS','Delivery Area Surcharge — ZIP-based, $3.18 standard / $5.22 extended'],['Packaging','L1 > 45.72cm OR L2 > 33.02cm → region-based'],['Serviceable MPs','Amazon, Other, Ebay, Etsy, Amazon FBA, Tiktok, Alibris, Walmart, FAIRE'],['PO Box','No']]
+  };
+
+  el.innerHTML=`
+    <div style="display:flex;gap:8px;margin-bottom:20px;align-items:center"><h2 style="font-size:18px;font-weight:600;flex:1">Rules & Surcharges</h2></div>
+    ${CARRIERS.map(c=>`
+    <div class="card" style="margin-bottom:16px">
+      <div class="rules-carrier-header">
+        <div class="carrier-dot" style="background:${c.color}"></div>
+        <span style="font-weight:600;font-size:15px">${c.label}</span>
+      </div>
+      <table>
+        <thead><tr><th style="width:35%">Rule</th><th>Value / Condition</th></tr></thead>
+        <tbody>
+          ${rulesRows[c.key].map(([rule,val],i)=>`<tr style="${i%2?'background:var(--surface2)':''}"><td style="color:var(--text2);font-size:12px">${rule}</td><td class="mono">${val}</td></tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`).join('')}
+    <div class="card" style="background:var(--orange-bg);border-color:#fcd34d">
+      <div style="font-size:13px;color:var(--orange);font-weight:500">UPS Region-Based Surcharges</div>
+      <div style="font-size:12px;color:var(--text2);margin-top:6px">Overweight, Overdimension, Large Package, Unauthorized, DAS, and Packaging surcharges are ZIP-code driven. Upload the <strong>REGION_RATE_LOOKUP</strong> file in Zone Mapping tab to enable dynamic ZIP-based surcharge calculation.</div>
+    </div>
+  `;
+}
+
+function renderZones(){
+  const el=$('#tab-zones');
+  const view=window._zoneView||'uniuni';
+  const entries=Object.entries(state.zoneMap[view]||{});
+
+  el.innerHTML=`
+    <div style="display:flex;gap:8px;margin-bottom:20px;align-items:center"><h2 style="font-size:18px;font-weight:600;flex:1">Zone Mapping</h2></div>
+    <div class="card">
+      <div class="upload-zone" onclick="$('#zone-input').click()">
+        <div class="upload-zone-icon"><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20 26V8m0 0l-6 6m6-6l6 6"/><path d="M4 28l1.3 5.2A2 2 0 007.2 35h25.6a2 2 0 001.9-1.8L36 28"/></svg></div>
+        <div class="upload-zone-label">Upload Zone Mapping file</div>
+        <div class="upload-zone-hint">Columns: country, partner, carrier, service, source, destination, type, value</div>
+      </div>
+      <input type="file" id="zone-input" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleZoneFile(event)"/>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center">
+      <div class="tab-pills">
+        <button class="tab-pill${view==='uniuni'?' active':''}" onclick="window._zoneView='uniuni';renderZones()">UniUni</button>
+        <button class="tab-pill${view==='usps'?' active':''}" onclick="window._zoneView='usps';renderZones()">USPS Custom</button>
+      </div>
+      <span style="font-size:12px;color:var(--text2);margin-left:8px">${entries.length} ZIP codes loaded</span>
+    </div>
+    ${entries.length>0?`
+    <div class="tbl-wrap" style="max-height:420px;overflow-y:auto">
+      <table>
+        <thead><tr><th>ZIP Code</th><th>Zone</th></tr></thead>
+        <tbody>
+          ${entries.slice(0,100).map(([z,zone],i)=>`<tr style="${i%2?'background:var(--surface2)':''}"><td class="mono">${z}</td><td>${badge('badge-blue','Zone '+zone)}</td></tr>`).join('')}
+          ${entries.length>100?`<tr><td colspan="2" style="text-align:center;padding:12px;color:var(--text2);font-size:12px">Showing first 100 of ${entries.length} entries</td></tr>`:''}
+        </tbody>
+      </table>
+    </div>`:`
+    <div class="card" style="text-align:center;padding:40px;color:var(--text2)">
+      <div style="font-size:14px;margin-bottom:6px">No zone mapping loaded</div>
+      <div style="font-size:12px">USPS zones are auto-calculated from ZIP3 prefix. Upload your Zone Mapping Template file to add UniUni or custom carrier zones.</div>
+    </div>`}
+  `;
+}
+
+function renderAnalysis(){
+  const el=$('#tab-analysis');
+  const wt=window._anaWt||2;
+  const zones=[1,2,3,4,5,6,7,8];
+  const rows=zones.map(z=>{const r={z};CARRIERS.forEach(c=>{const v=getRate(state.rateData,c.key,z,wt,'LBS');r[c.key]=v;});return r;});
+
+  el.innerHTML=`
+    <div style="display:flex;gap:8px;margin-bottom:20px;align-items:center"><h2 style="font-size:18px;font-weight:600;flex:1">Rate Analysis</h2></div>
+    <div class="card">
+      <div style="display:flex;gap:16px;align-items:flex-end;margin-bottom:20px">
+        <div class="form-group" style="margin:0"><label class="lbl">Weight (lbs)</label>
+          <input class="inp" type="number" style="width:110px" value="${wt}" min="0.1" max="100" step="0.5" oninput="window._anaWt=parseFloat(this.value)||1;renderAnalysis()"/>
+        </div>
+        <div style="font-size:12px;color:var(--text2);padding-bottom:8px">Showing base rates only — surcharges depend on dimensions and address</div>
+      </div>
+      <div class="tbl-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Zone</th>
+              ${CARRIERS.map(c=>`<th style="color:${c.color}">${c.label}</th>`).join('')}
+              <th>Cheapest</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map((row,i)=>{
+              const eligibles=CARRIERS.map(c=>({...c,r:row[c.key]})).filter(c=>c.r!=null);
+              const ch=eligibles.length?eligibles.reduce((a,b)=>a.r<b.r?a:b):null;
+              return`<tr style="${i%2?'background:var(--surface2)':''}">
+                <td style="font-weight:600">Zone ${row.z}</td>
+                ${CARRIERS.map(c=>{const r=row[c.key];const isM=ch?.key===c.key&&r!=null;return`<td class="mono" style="${isM?`color:${c.color};font-weight:700;background:${c.color}11`:''}">${r!=null?'$'+r.toFixed(2):'-'}</td>`;}).join('')}
+                <td>${ch?badge(ch.cls,ch.label):'-'}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+// ═══════ EVENT HANDLERS ═══════
+function switchTab(el,tab){
+  $$('.nav-item').forEach(x=>x.classList.remove('active'));el.classList.add('active');
+  $$('.tab-content').forEach(x=>x.style.display='none');
+  $(`#tab-${tab}`).style.display='';
+  ({calculator:renderCalculator,rates:renderRates,rules:renderRules,zones:renderZones,analysis:renderAnalysis})[tab]?.();
+}
+
+function setMode(mode,btn){
+  btn.parentElement.querySelectorAll('.tab-pill').forEach(x=>x.classList.remove('active'));btn.classList.add('active');
+  $('#mode-upload').style.display=mode==='upload'?'':'none';
+  $('#mode-manual').style.display=mode==='manual'?'':'none';
+}
+
+function handleShipDrop(e){e.preventDefault();$('#ship-drop').classList.remove('drag');const f=e.dataTransfer.files[0];if(f)handleShipFile({target:{files:[f]}});}
+
+async function handleShipFile(e){
+  const f=e.target.files[0];if(!f)return;
+  try{const buf=await f.arrayBuffer();const rows=parseXlsx(new Uint8Array(buf),'shipment');state.shipments=rows.map(r=>mapRow(r)).filter(r=>r.grossKg>0);state.results=[];renderCalculator();show(`${state.shipments.length} shipments loaded from ${f.name}`);}
+  catch(err){show('Failed to parse: '+err.message,'error');}
+}
+
+async function handleRateFile(e){
+  const f=e.target.files[0];if(!f)return;
+  try{const buf=await f.arrayBuffer();const rows=parseXlsx(new Uint8Array(buf));let n=0;
+    rows.forEach(r=>{const s=String(r.Service||r.service||'');const z=String(r.Zone||r.zone||'');const w=String(r.LBS||r.lbs||r.Weight||'');const u=String(r.Unit||r.unit||'lbs').toLowerCase();const rate=parseFloat(r.Rate||r.rate||0);const sk=s.includes('GROUND_ADVANTAGE')||s.includes('Ground Advantage')?'USPS_GA':s.includes('PRIORITY')||s.includes('Priority Mail')?'USPS_PM':s.includes('UniUni')||s.includes('UNIUNI')?'UNIUNI':s.includes('UPS')?'UPS':null;if(!sk||!z||!w||!rate)return;if(!state.rateData[sk])state.rateData[sk]={oz:{},lbs:{}};const tbl=u.includes('oz')?'oz':'lbs';if(!state.rateData[sk][tbl][z])state.rateData[sk][tbl][z]={};state.rateData[sk][tbl][z][w]=rate;n++;});
+    show(`Updated ${n} rate entries from ${f.name}`);renderRates();}
+  catch(err){show('Failed to parse: '+err.message,'error');}
+}
+
+async function handleZoneFile(e){
+  const f=e.target.files[0];if(!f)return;
+  try{const buf=await f.arrayBuffer();const rows=parseXlsx(new Uint8Array(buf),'zone');let n=0;
+    rows.forEach(r=>{const carrier=String(r.carrier||r.Carrier||'').toLowerCase();const src=String(r.source||r.Source||'JFK').toUpperCase();const dest=String(r.destination||r.Destination||'').padStart(5,'0');const zone=parseInt(r.value||r.Value||r.Zone||r.zone||0);if(!dest||!zone)return;const key=carrier.includes('uni')?'uniuni':'usps';if(!state.zoneMap[key])state.zoneMap[key]={};if(src==='JFK'||!state.zoneMap[key][dest])state.zoneMap[key][dest]=zone;n++;});
+    show(`Loaded ${n} zone entries from ${f.name}`);renderZones();}
+  catch(err){show('Failed to parse: '+err.message,'error');}
+}
+
+function runCalcUI(){
+  const mode=$('.tab-pill.active')?.textContent?.includes('Manual')?'manual':'upload';
+  let src;
+  if(mode==='manual'){
+    src=[{awb:'MANUAL',boxId:'BOX-1',grossKg:parseFloat($('#m-gw').value)||0,L_cm:parseFloat($('#m-l').value)||0,W_cm:parseFloat($('#m-w').value)||0,H_cm:parseFloat($('#m-h').value)||0,postal:$('#m-zip').value.padStart(5,'0'),marketplace:$('#m-mp').value,isPO:$('#m-po').checked}];
+  }else{
+    if(!state.shipments.length){alert('Upload a shipment file first.');return;}
+    src=state.shipments;
+  }
+  state.results=runCalc(src);renderCalculator();
+}
+
+// ═══════ INIT ═══════
+renderCalculator();
+</script>
+</body>
+</html>
