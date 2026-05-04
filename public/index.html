@@ -325,7 +325,15 @@ function runCalc(src){return src.map(box=>{const costs=CARRIERS.map(c=>calcCost(
 // ═══════════════════════════════════════════════════
 // EXCEL PARSING
 // ═══════════════════════════════════════════════════
-function parseXlsx(buf,hint){const wb=XLSX.read(buf,{type:'array',cellDates:true});const name=hint?wb.SheetNames.find(n=>n.toLowerCase().includes(hint.toLowerCase()))||wb.SheetNames[0]:wb.SheetNames[0];return XLSX.utils.sheet_to_json(wb.Sheets[name],{defval:null});}
+function parseXlsx(buf,hint){
+  const wb=XLSX.read(buf,{type:'array',cellDates:true});
+  // 1. Try sheet whose name contains the hint
+  let name=hint?wb.SheetNames.find(n=>n.toLowerCase().includes(hint.toLowerCase())):null;
+  // 2. Otherwise pick the sheet with the most rows
+  if(!name){name=wb.SheetNames.reduce((best,sn)=>{const ref=wb.Sheets[sn]['!ref'];if(!ref)return best;const rows=XLSX.utils.decode_range(ref).e.r;const bref=wb.Sheets[best]?.['!ref'];const bestRows=bref?XLSX.utils.decode_range(bref).e.r:0;return rows>bestRows?sn:best;},wb.SheetNames[0]);}
+  window._lastSheet=name;
+  return XLSX.utils.sheet_to_json(wb.Sheets[name],{defval:null});
+}
 function mapRow(row){
   const norm=s=>s.toLowerCase().replace(/[^a-z0-9]/g,'');
   const g=names=>{
@@ -838,12 +846,15 @@ async function handleShipFile(e){
   try{
     const buf=await f.arrayBuffer();
     const rows=parseXlsx(new Uint8Array(buf),'shipment');
+    const sheet=window._lastSheet||'?';
     const all=rows.map(r=>mapRow(r));
-    const valid=all.filter(r=>r.grossKg>0);
-    state.shipments=valid;state.results=[];state.calcPage=0;
+    // Keep all rows that have at least a postal code; weight=0 rows will just get "no carrier"
+    const valid=all.filter(r=>r.postal&&r.postal!=='00000');
+    state.shipments=valid.length?valid:all;
+    state.results=[];state.calcPage=0;
     renderCalculator();
-    const skipped=all.length-valid.length;
-    show(`${valid.length} shipments loaded from ${f.name}${skipped?' — '+skipped+' rows skipped (missing/zero weight)':''}`);
+    const noWt=valid.filter(r=>r.grossKg<=0).length;
+    show(`${state.shipments.length} rows loaded from sheet "${sheet}"${noWt?' — '+noWt+' rows have no weight':''}`);
   }catch(err){show('Failed to parse: '+err.message,'error');}
 }
 
