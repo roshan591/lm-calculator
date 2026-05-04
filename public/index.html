@@ -249,6 +249,76 @@ function exportCSV(){
   const a=document.createElement('a');a.href='data:text/csv,'+encodeURIComponent(csv);a.download='lm_costing_'+new Date().toISOString().slice(0,10)+'.csv';a.click();
 }
 
+function downloadTemplate(type){
+  const T={
+    shipment:{name:'Shipment_Level_Template.csv',rows:[
+      ['AWB','Boxes','Gross Weight','Length','Width','Height','Reciever Postal Code','Market_Place','Is PO Address'],
+      ['TRK100001','BOX-001','0.50','30','20','10','10001','Amazon','no'],
+      ['TRK100002','BOX-002','1.20','40','25','15','90210','Walmart','no'],
+      ['TRK100003','BOX-003','0.80','25','18','8','60601','Etsy','yes'],
+      ['TRK100004','BOX-004','2.50','45','30','20','77001','eBay','no'],
+    ]},
+    rates:{name:'Rate_Card_Template.csv',rows:[
+      ['Service','Zone','LBS','Unit','Rate'],
+      ['Ground Advantage','1','1','lbs','5.57'],
+      ['Ground Advantage','1','2','lbs','5.81'],
+      ['Ground Advantage','1','1','oz','3.74'],
+      ['Ground Advantage','2','1','lbs','5.63'],
+      ['Priority Mail','1','1','lbs','6.55'],
+      ['Priority Mail','2','1','lbs','6.67'],
+      ['UniUni','1','1','lbs','2.79'],
+      ['UniUni','2','1','lbs','2.83'],
+      ['UPS','2','1','lbs','6.90'],
+      ['UPS','3','1','lbs','6.90'],
+    ]},
+    rules:{name:'Rules_Reference.csv',rows:[
+      ['Carrier','Rule','Value','Notes'],
+      ['USPS_GA','volFactor','166','cu.in per lb — dimensional weight divisor'],
+      ['USPS_GA','volThreshold','1728','cu.in — apply vol weight only above this'],
+      ['USPS_GA','maxWeight','70','Max weight in lbs'],
+      ['USPS_GA','oversize_L1_threshold','55','cm — longest side triggers surcharge'],
+      ['USPS_GA','oversize_L1_charge','3.00','USD'],
+      ['USPS_GA','oversize_L2_threshold','45','cm — 2nd longest side'],
+      ['USPS_GA','oversize_L2_charge','3.00','USD'],
+      ['USPS_GA','oversize_L3_threshold','38','cm — 3rd side'],
+      ['USPS_GA','oversize_L3_charge','3.00','USD'],
+      ['USPS_GA','overlength_min','55','cm — start of overlength range'],
+      ['USPS_GA','overlength_max','76','cm — end of overlength range'],
+      ['USPS_GA','overlength_charge','4.50','USD — when 55cm < L <= 76cm'],
+      ['USPS_GA','overlength_over_charge','10.00','USD — when L > 76cm'],
+      ['USPS_GA','overvolume_threshold','3456','cu.in'],
+      ['USPS_GA','overvolume_charge','21.00','USD'],
+      ['USPS_PM','volFactor','166',''],
+      ['USPS_PM','volThreshold','1728',''],
+      ['USPS_PM','maxWeight','40','lbs'],
+      ['USPS_PM','overlength_over_charge','21.00','USD (different from GA)'],
+      ['USPS_PM','overvolume_charge','35.00','USD'],
+      ['UNIUNI','volFactor','194','Always applied — no threshold'],
+      ['UNIUNI','maxWeight','30','lbs'],
+      ['UNIUNI','maxLongestInch','20','inches — max longest side'],
+      ['UNIUNI','maxCubicIn','1728','cu.in — max volume'],
+      ['UPS','volFactor','225','Always applied — no threshold'],
+      ['UPS','maxWeight','150','lbs'],
+      ['UPS','fuelSurcharge','0.1803','18.03% applied on base + fixed surcharges'],
+      ['UPS','residentialCharge','3.35','USD — applied when gross weight < 10kg'],
+      ['UPS','overweightThreshold','50','lbs — triggers region-based surcharge'],
+    ]},
+    zones:{name:'Zone_Mapping_Template.csv',rows:[
+      ['country','partner','carrier','service','source','destination','type','value'],
+      ['US','UniUni','uniuni','Ground','JFK','10001','zone','1'],
+      ['US','UniUni','uniuni','Ground','JFK','90210','zone','3'],
+      ['US','UniUni','uniuni','Ground','JFK','60601','zone','2'],
+      ['US','UniUni','uniuni','Ground','JFK','77001','zone','5'],
+      ['US','UniUni','uniuni','Ground','JFK','33101','zone','6'],
+      ['US','USPS','usps','Ground Advantage','JFK','10001','zone','1'],
+      ['US','USPS','usps','Ground Advantage','JFK','90210','zone','8'],
+    ]}
+  };
+  const t=T[type];if(!t)return;
+  const csv=t.rows.map(r=>r.map(v=>String(v).includes(',')?`"${v}"`:v).join(',')).join('\n');
+  const a=document.createElement('a');a.href='data:text/csv,'+encodeURIComponent(csv);a.download=t.name;a.click();
+}
+
 // ═══════ RENDER TABS ═══════
 
 function renderCalculator(){
@@ -261,6 +331,7 @@ function renderCalculator(){
     <div id="toast" class="toast" style="display:none"></div>
     <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center">
       <h2 style="font-size:18px;font-weight:600;flex:1">Cost Calculator</h2>
+      <button class="btn btn-sm" onclick="downloadTemplate('shipment')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Download Template</button>
       ${r.length>0?`<button class="btn btn-sm" onclick="exportCSV()">Export CSV</button>`:''}
     </div>
 
@@ -357,7 +428,7 @@ function renderRates(){
   const rows=[...Object.entries(t?.oz?.[zone]||{}).map(([w,r])=>({w:+w,u:'OZ',r})),...Object.entries(t?.lbs?.[zone]||{}).map(([w,r])=>({w:+w,u:'LBS',r}))].sort((a,b)=>a.u==='OZ'&&b.u==='LBS'?-1:a.u==='LBS'&&b.u==='OZ'?1:a.w-b.w);
 
   el.innerHTML=`
-    <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center"><h2 style="font-size:18px;font-weight:600;flex:1">Rate Cards</h2></div>
+    <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center"><h2 style="font-size:18px;font-weight:600;flex:1">Rate Cards</h2><button class="btn btn-sm" onclick="downloadTemplate('rates')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Download Template</button></div>
     <div class="card">
       <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:16px">
         <div class="form-group" style="margin:0"><label class="lbl">Service</label>
@@ -401,7 +472,7 @@ function renderRules(){
   };
 
   el.innerHTML=`
-    <div style="display:flex;gap:8px;margin-bottom:20px;align-items:center"><h2 style="font-size:18px;font-weight:600;flex:1">Rules & Surcharges</h2></div>
+    <div style="display:flex;gap:8px;margin-bottom:20px;align-items:center"><h2 style="font-size:18px;font-weight:600;flex:1">Rules & Surcharges</h2><button class="btn btn-sm" onclick="downloadTemplate('rules')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Download Reference</button></div>
     ${CARRIERS.map(c=>`
     <div class="card" style="margin-bottom:16px">
       <div class="rules-carrier-header">
@@ -428,7 +499,7 @@ function renderZones(){
   const entries=Object.entries(state.zoneMap[view]||{});
 
   el.innerHTML=`
-    <div style="display:flex;gap:8px;margin-bottom:20px;align-items:center"><h2 style="font-size:18px;font-weight:600;flex:1">Zone Mapping</h2></div>
+    <div style="display:flex;gap:8px;margin-bottom:20px;align-items:center"><h2 style="font-size:18px;font-weight:600;flex:1">Zone Mapping</h2><button class="btn btn-sm" onclick="downloadTemplate('zones')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> Download Template</button></div>
     <div class="card">
       <div class="upload-zone" onclick="$('#zone-input').click()">
         <div class="upload-zone-icon"><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20 26V8m0 0l-6 6m6-6l6 6"/><path d="M4 28l1.3 5.2A2 2 0 007.2 35h25.6a2 2 0 001.9-1.8L36 28"/></svg></div>
