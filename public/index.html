@@ -542,6 +542,29 @@ function downloadTemplate(type){
       ['US','UniUni','uniuni','Ground','JFK','33101','zone','6'],
       ['US','USPS','usps','Ground Advantage','JFK','10001','zone','1'],
       ['US','USPS','usps','Ground Advantage','JFK','90210','zone','8'],
+    ]},
+    region:{name:'REGION_RATE_LOOKUP_Template.csv',rows:[
+      ['carrier','service','surcharge_name','surcharge_type','surcharge_value','rate'],
+      ['UPS','Ground','DAS Residential','Zipcode','10001','3.18'],
+      ['UPS','Ground','DAS Commercial','Zipcode','10001','2.32'],
+      ['UPS','Ground','EDAS Residential','Zipcode','01005','3.18'],
+      ['UPS','Ground','EDAS Commercial','Zipcode','01005','2.94'],
+      ['UPS','Ground','Remote Area','Zipcode','99540','45.85'],
+      ['UPS','Ground','OWSURCHARGE','Zone','1','33.53'],
+      ['UPS','Ground','OWSURCHARGE','Zone','2','33.53'],
+      ['UPS','Ground','OWSURCHARGE','Zone','3','36.60'],
+      ['UPS','Ground','ODSURCHARGES','Zone','1','21.63'],
+      ['UPS','Ground','ODSURCHARGES','Zone','2','21.63'],
+      ['UPS','Ground','LPSURCHARGES','Zone','1','217.30'],
+      ['UPS','Ground','LPSURCHARGES','Zone','3','238.50'],
+      ['UPS','Ground','Packaging','Zone','1','19.30'],
+      ['UPS','Ground','UNAUTHORIZED','Zone','1','1457.50'],
+      ['FEDEX','Ground','DAS Residential','Zipcode','10001','4.45'],
+      ['FEDEX','Ground','EDAS Residential','Zipcode','01005','8.30'],
+      ['FEDEX','Ground','Remote Area','Zipcode','99540','41.50'],
+      ['FEDEX','Ground','OWSURCHARGE','Zone','1','43.50'],
+      ['FEDEX','Ground','LPSURCHARGES','Zone','1','255.00'],
+      ['FEDEX','Ground','UNAUTHORIZED','Zone','1','1875.00'],
     ]}
   };
   const t=T[type];if(!t)return;
@@ -549,6 +572,50 @@ function downloadTemplate(type){
   const a=document.createElement('a');a.href='data:text/csv,'+encodeURIComponent(csv);a.download=t.name;a.click();
 }
 
+// ═══════════════════════════════════════════════════
+// MANUAL ADD HELPERS
+// ═══════════════════════════════════════════════════
+function addRateManual(){
+  const svc=document.getElementById('mr-svc').value;
+  const zone=document.getElementById('mr-zone').value;
+  const wt=document.getElementById('mr-wt').value;
+  const unit=document.getElementById('mr-unit').value;
+  const rate=parseFloat(document.getElementById('mr-rate').value);
+  if(!svc||!zone||!wt||isNaN(rate)||rate<=0){show('Fill all fields with valid values','error');return;}
+  if(!state.rateData[svc])state.rateData[svc]={oz:{},lbs:{}};
+  const tbl=unit==='OZ'?'oz':'lbs';
+  if(!state.rateData[svc][tbl][zone])state.rateData[svc][tbl][zone]={};
+  state.rateData[svc][tbl][zone][wt]=rate;
+  document.getElementById('mr-wt').value='';
+  document.getElementById('mr-rate').value='';
+  show(`Added: ${CARRIERS.find(c=>c.key===svc)?.label} Zone ${zone} ${wt} ${unit} = $${rate.toFixed(2)}`);
+  renderRates();
+}
+function addZoneManual(){
+  const carrier=document.getElementById('mz-carrier').value;
+  const zip=document.getElementById('mz-zip').value.replace(/[^0-9]/g,'').padStart(5,'0');
+  const zone=parseInt(document.getElementById('mz-zone').value);
+  if(!zip||zip==='00000'||!zone||zone<1||zone>8){show('Enter a valid ZIP code and zone (1–8)','error');return;}
+  if(!state.zoneMap[carrier])state.zoneMap[carrier]={};
+  state.zoneMap[carrier][zip]=zone;
+  document.getElementById('mz-zip').value='';
+  show(`Zone added: ZIP ${zip} → Zone ${zone} (${carrier})`);
+  renderZones();
+}
+function addDasZipManual(){
+  const carrier=document.getElementById('md-carrier').value;
+  const sname=document.getElementById('md-sname').value;
+  const zip=document.getElementById('md-zip').value.replace(/[^0-9]/g,'').padStart(5,'0');
+  const rate=parseFloat(document.getElementById('md-rate').value);
+  if(!carrier||!sname||!zip||zip==='00000'||isNaN(rate)||rate<=0){show('Fill all fields with valid values','error');return;}
+  if(!state.dasMap[carrier])state.dasMap[carrier]={};
+  if(!state.dasMap[carrier][sname])state.dasMap[carrier][sname]={};
+  state.dasMap[carrier][sname][zip]=rate;
+  saveSurchargeData();
+  document.getElementById('md-zip').value='';
+  show(`Added: ${carrier} ${sname} ZIP ${zip} = $${rate.toFixed(2)}`);
+  renderSurcharges();
+}
 // ═══════════════════════════════════════════════════
 // USER MANAGEMENT (Network Access)
 // ═══════════════════════════════════════════════════
@@ -698,15 +765,57 @@ function renderRates(){
   const zones=Object.keys(t?.lbs||t?.oz||{}).sort((a,b)=>+a-+b);
   const rows=[...Object.entries(t?.oz?.[zone]||{}).map(([w,r])=>({w:+w,u:'OZ',r})),...Object.entries(t?.lbs?.[zone]||{}).map(([w,r])=>({w:+w,u:'LBS',r}))].sort((a,b)=>a.u==='OZ'&&b.u==='LBS'?-1:a.u==='LBS'&&b.u==='OZ'?1:a.w-b.w);
 
+  const rateMode=window._rateMode||'view';
   el.innerHTML=`
     <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center">
       <h2 style="font-size:18px;font-weight:600;flex:1">Rate Cards</h2>
       <button class="btn btn-sm" onclick="downloadTemplate('rates')">${DL_ICON} Download Template</button>
     </div>
-    <div class="card">
-      <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:16px">
+    ${admin?`
+    <div class="card" style="margin-bottom:16px">
+      <div class="tab-pills" style="margin-bottom:14px">
+        <button class="tab-pill${rateMode==='upload'?' active':''}" onclick="window._rateMode='upload';renderRates()">Bulk Upload</button>
+        <button class="tab-pill${rateMode==='manual'?' active':''}" onclick="window._rateMode='manual';renderRates()">Manual Add</button>
+      </div>
+      ${rateMode==='upload'?`
+      <div class="upload-zone" onclick="$('#rate-input').click()">
+        <div class="upload-zone-icon"><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20 26V8m0 0l-6 6m6-6l6 6"/><path d="M4 28l1.3 5.2A2 2 0 007.2 35h25.6a2 2 0 001.9-1.8L36 28"/></svg></div>
+        <div class="upload-zone-label">Drop rate card file here or click to browse</div>
+        <div class="upload-zone-hint">Columns: Service, Zone, LBS, Unit, Rate — use Download Template above</div>
+      </div>
+      <input type="file" id="rate-input" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleRateFile(event)"/>`:`
+      <div class="form-grid" style="margin-bottom:12px">
         <div class="form-group" style="margin:0"><label class="lbl">Service</label>
-          <select class="inp" style="width:230px" onchange="window._rateFilter=this.value;renderRates()">
+          <select class="inp" id="mr-svc">
+            ${CARRIERS.map(c=>`<option value="${c.key}">${c.label}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group" style="margin:0"><label class="lbl">Zone</label>
+          <select class="inp" id="mr-zone">
+            ${[1,2,3,4,5,6,7,8].map(z=>`<option value="${z}">Zone ${z}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group" style="margin:0"><label class="lbl">Weight</label>
+          <input class="inp" id="mr-wt" type="number" placeholder="e.g. 5" min="0.01" step="0.01"/>
+        </div>
+        <div class="form-group" style="margin:0"><label class="lbl">Unit</label>
+          <select class="inp" id="mr-unit"><option value="LBS">LBS</option><option value="OZ">OZ</option></select>
+        </div>
+        <div class="form-group" style="margin:0"><label class="lbl">Rate (USD)</label>
+          <input class="inp" id="mr-rate" type="number" placeholder="e.g. 6.57" min="0.01" step="0.01"/>
+        </div>
+        <div class="form-group" style="margin:0;display:flex;align-items:flex-end">
+          <button class="btn btn-primary" style="width:100%" onclick="addRateManual()">Add Rate</button>
+        </div>
+      </div>`}
+    </div>`:`
+    <div class="card" style="background:var(--surface2);border-style:dashed;text-align:center;padding:18px;margin-bottom:16px">
+      <span style="font-size:13px;color:var(--text2)">Rate card upload is restricted to Admins</span>
+    </div>`}
+    <div class="card">
+      <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
+        <div class="form-group" style="margin:0"><label class="lbl">Service</label>
+          <select class="inp" style="width:220px" onchange="window._rateFilter=this.value;renderRates()">
             ${CARRIERS.map(c=>`<option value="${c.key}"${c.key===svc?' selected':''}>${c.label}</option>`).join('')}
           </select>
         </div>
@@ -715,16 +824,8 @@ function renderRates(){
             ${zones.map(z=>`<option value="${z}"${z===zone?' selected':''}>Zone ${z}</option>`).join('')}
           </select>
         </div>
-        ${admin?`
-        <div style="margin-left:auto">
-          <div class="upload-zone" style="padding:12px 20px;text-align:left;display:flex;align-items:center;gap:12px" onclick="$('#rate-input').click()">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-            <div><div style="font-size:13px;font-weight:500">Upload Rate Card</div><div style="font-size:11px;color:var(--text2)">Use the template format</div></div>
-          </div>
-          <input type="file" id="rate-input" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleRateFile(event)"/>
-        </div>`:`<div style="margin-left:auto"><span class="badge badge-gray">Viewer — upload disabled</span></div>`}
+        <span style="font-size:12px;color:var(--text2);padding-bottom:8px">${rows.length} entries for Zone ${zone} · ${CARRIERS.find(c=>c.key===svc)?.label}</span>
       </div>
-      <div style="font-size:12px;color:var(--text2);margin-bottom:10px">${rows.length} rate entries for Zone ${zone} · ${CARRIERS.find(c=>c.key===svc)?.label}</div>
       <div style="max-height:420px;overflow-y:auto">
         <table>
           <thead><tr><th>Weight</th><th>Unit</th><th>Rate (USD)</th></tr></thead>
@@ -796,24 +897,47 @@ function renderZones(){
   const admin=isAdmin();
   const view=window._zoneView||'uniuni';
   const entries=Object.entries(state.zoneMap[view]||{});
+  const zoneMode=window._zoneMode||'upload';
   el.innerHTML=`
-    <div style="display:flex;gap:8px;margin-bottom:20px;align-items:center">
+    <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center">
       <h2 style="font-size:18px;font-weight:600;flex:1">Zone Mapping</h2>
       <button class="btn btn-sm" onclick="downloadTemplate('zones')">${DL_ICON} Download Template</button>
     </div>
     ${admin?`
-    <div class="card">
+    <div class="card" style="margin-bottom:16px">
+      <div class="tab-pills" style="margin-bottom:14px">
+        <button class="tab-pill${zoneMode==='upload'?' active':''}" onclick="window._zoneMode='upload';renderZones()">Bulk Upload</button>
+        <button class="tab-pill${zoneMode==='manual'?' active':''}" onclick="window._zoneMode='manual';renderZones()">Manual Add</button>
+      </div>
+      ${zoneMode==='upload'?`
       <div class="upload-zone" onclick="$('#zone-input').click()">
         <div class="upload-zone-icon"><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20 26V8m0 0l-6 6m6-6l6 6"/><path d="M4 28l1.3 5.2A2 2 0 007.2 35h25.6a2 2 0 001.9-1.8L36 28"/></svg></div>
-        <div class="upload-zone-label">Upload Zone Mapping file</div>
+        <div class="upload-zone-label">Drop Zone Mapping file here or click to browse</div>
         <div class="upload-zone-hint">Columns: country, partner, carrier, service, source, destination, type, value</div>
       </div>
-      <input type="file" id="zone-input" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleZoneFile(event)"/>
+      <input type="file" id="zone-input" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleZoneFile(event)"/>`:`
+      <div style="display:grid;grid-template-columns:1fr 1fr 120px auto;gap:12px;align-items:flex-end">
+        <div class="form-group" style="margin:0"><label class="lbl">Carrier</label>
+          <select class="inp" id="mz-carrier">
+            <option value="uniuni">UniUni</option>
+            <option value="usps">USPS Custom</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin:0"><label class="lbl">ZIP Code</label>
+          <input class="inp" id="mz-zip" type="text" placeholder="e.g. 10001" maxlength="5" oninput="this.value=this.value.replace(/[^0-9]/g,'')"/>
+        </div>
+        <div class="form-group" style="margin:0"><label class="lbl">Zone (1–8)</label>
+          <select class="inp" id="mz-zone">
+            ${[1,2,3,4,5,6,7,8].map(z=>`<option value="${z}">Zone ${z}</option>`).join('')}
+          </select>
+        </div>
+        <button class="btn btn-primary" onclick="addZoneManual()">Add Zone</button>
+      </div>`}
     </div>`:`
-    <div class="card" style="background:var(--surface2);border-style:dashed;text-align:center;padding:18px">
-      <span style="font-size:13px;color:var(--text2)">Zone file upload is restricted to Admins</span>
+    <div class="card" style="background:var(--surface2);border-style:dashed;text-align:center;padding:18px;margin-bottom:16px">
+      <span style="font-size:13px;color:var(--text2)">Zone mapping upload is restricted to Admins</span>
     </div>`}
-    <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center">
+    <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center">
       <div class="tab-pills">
         <button class="tab-pill${view==='uniuni'?' active':''}" onclick="window._zoneView='uniuni';renderZones()">UniUni</button>
         <button class="tab-pill${view==='usps'?' active':''}" onclick="window._zoneView='usps';renderZones()">USPS Custom</button>
@@ -825,14 +949,14 @@ function renderZones(){
       <table>
         <thead><tr><th>ZIP Code</th><th>Zone</th></tr></thead>
         <tbody>
-          ${entries.slice(0,100).map(([z,zone],i)=>`<tr style="${i%2?'background:var(--surface2)':''}"><td class="mono">${z}</td><td>${badge('badge-blue','Zone '+zone)}</td></tr>`).join('')}
-          ${entries.length>100?`<tr><td colspan="2" style="text-align:center;padding:12px;color:var(--text2);font-size:12px">Showing first 100 of ${entries.length} entries</td></tr>`:''}
+          ${entries.slice(0,200).map(([z,zone],i)=>`<tr style="${i%2?'background:var(--surface2)':''}"><td class="mono">${z}</td><td>${badge('badge-blue','Zone '+zone)}</td></tr>`).join('')}
+          ${entries.length>200?`<tr><td colspan="2" style="text-align:center;padding:12px;color:var(--text2);font-size:12px">Showing first 200 of ${entries.length} entries</td></tr>`:''}
         </tbody>
       </table>
     </div>`:`
     <div class="card" style="text-align:center;padding:40px;color:var(--text2)">
       <div style="font-size:14px;margin-bottom:6px">No zone mapping loaded</div>
-      <div style="font-size:12px">USPS zones are auto-calculated from ZIP3 prefix. Upload a Zone Mapping file to add UniUni coverage.</div>
+      <div style="font-size:12px">USPS zones are auto-calculated from ZIP3 prefix. Upload a Zone Mapping file or use Manual Add to add UniUni coverage.</div>
     </div>`}
   `;
 }
@@ -1024,32 +1148,59 @@ function renderSurcharges(){
     ?`<input class="inp" type="number" style="width:88px;display:inline;padding:4px 7px;font-size:12px" value="${v}" step="any" onchange="setSurThr('${c}','${k}',this.value)"/> <span style="font-size:11px;color:var(--text2)">${s}</span>`
     :`<span class="mono" style="font-size:12px">${v}</span> <span style="font-size:11px;color:var(--text2)">${s}</span>`;
 
+  const dasMode=window._dasMode||'upload';
   el.innerHTML=`
     <div style="display:flex;gap:8px;margin-bottom:20px;align-items:center">
       <h2 style="font-size:18px;font-weight:600;flex:1">DAS & Regional Surcharges</h2>
       ${admin?`<span class="badge badge-blue" style="font-size:11px">Editing enabled</span>`:''}
+      <button class="btn btn-sm" onclick="downloadTemplate('region')">${DL_ICON} Download Template</button>
     </div>
 
-    <!-- Upload -->
+    <!-- Upload / Manual Add -->
     ${admin?`
     <div class="card" style="margin-bottom:20px">
-      <div class="card-title">Upload REGION_RATE_LOOKUP File</div>
-      <div style="font-size:12px;color:var(--text2);margin-bottom:12px">
-        Expected columns: <span class="mono">carrier, service, surcharge_name, surcharge_type (Zipcode/Zone), surcharge_value, rate</span>
+      <div class="tab-pills" style="margin-bottom:14px">
+        <button class="tab-pill${dasMode==='upload'?' active':''}" onclick="window._dasMode='upload';renderSurcharges()">Bulk Upload</button>
+        <button class="tab-pill${dasMode==='manual'?' active':''}" onclick="window._dasMode='manual';renderSurcharges()">Manual Add ZIP</button>
       </div>
-      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+      ${dasMode==='upload'?`
+      <div style="font-size:12px;color:var(--text2);margin-bottom:10px">
+        Columns: <span class="mono">carrier · service · surcharge_name · surcharge_type (Zipcode/Zone) · surcharge_value · rate</span>
+      </div>
+      <div style="display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap">
         <div class="upload-zone" style="flex:1;padding:14px 20px;min-width:220px;display:flex;align-items:center;gap:12px" onclick="$('#region-input').click()">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-          <div><div style="font-size:13px;font-weight:500">Upload REGION_RATE_LOOKUP</div><div style="font-size:11px;color:var(--text2)">Excel or CSV — ZIP-based DAS/EDAS + zone-based OW/OD/LP rates</div></div>
+          <div><div style="font-size:13px;font-weight:500">Upload REGION_RATE_LOOKUP</div><div style="font-size:11px;color:var(--text2)">Excel or CSV — DAS/EDAS ZIP codes + zone-based rates</div></div>
         </div>
         <input type="file" id="region-input" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleRegionFile(event)"/>
-        <div style="font-size:12px;color:var(--text2)">
-          ${Object.entries(state.dasMap).map(([c,m])=>
-            Object.entries(m).map(([sn,zips])=>`<div><strong>${c} · ${sn}:</strong> ${Object.keys(zips).length.toLocaleString()} ZIPs</div>`).join('')
-          ).join('')||'<em>No ZIP data loaded yet</em>'}
+        <div style="font-size:12px;color:var(--text2);line-height:1.9;min-width:200px">
+          ${Object.entries(state.dasMap).map(([c,m])=>Object.entries(m).map(([sn,zips])=>`<div><strong>${c} · ${sn}:</strong> ${Object.keys(zips).length.toLocaleString()} ZIPs</div>`).join('')).join('')||'<em style="color:var(--text3)">No ZIP data loaded yet</em>'}
         </div>
-      </div>
+      </div>`:`
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 120px auto;gap:12px;align-items:flex-end">
+        <div class="form-group" style="margin:0"><label class="lbl">Carrier</label>
+          <select class="inp" id="md-carrier">
+            <option value="UPS">UPS Ground</option>
+            <option value="FEDEX">FedEx Ground</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin:0"><label class="lbl">Surcharge Type</label>
+          <select class="inp" id="md-sname">
+            <option>DAS Residential</option><option>DAS Commercial</option>
+            <option>EDAS Residential</option><option>EDAS Commercial</option>
+            <option>Remote Area</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin:0"><label class="lbl">ZIP Code</label>
+          <input class="inp" id="md-zip" type="text" placeholder="e.g. 10001" maxlength="5" oninput="this.value=this.value.replace(/[^0-9]/g,'')"/>
+        </div>
+        <div class="form-group" style="margin:0"><label class="lbl">Rate ($)</label>
+          <input class="inp" id="md-rate" type="number" placeholder="3.18" min="0.01" step="0.01"/>
+        </div>
+        <button class="btn btn-primary" onclick="addDasZipManual()">Add ZIP</button>
+      </div>`}
     </div>`:''}
+
 
     <!-- Per-carrier cards -->
     ${SUR_CARRIERS.map(sc=>{
