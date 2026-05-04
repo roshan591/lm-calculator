@@ -154,6 +154,10 @@ td.mono{font-family:var(--mono);font-size:12px}
         Zone Mapping
       </div>
       <div class="sidebar-section">Administration</div>
+      <div class="nav-item" id="nav-surcharges" data-tab="surcharges" onclick="switchTab(this,'surcharges')" style="display:none">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/><path d="M8 12h1"/><path d="M15 12h1"/></svg>
+        DAS & Surcharges
+      </div>
       <div class="nav-item" id="nav-network" data-tab="network" onclick="switchTab(this,'network')" style="display:none">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
         Network Access
@@ -167,6 +171,7 @@ td.mono{font-family:var(--mono);font-size:12px}
       <div id="tab-rates"      class="tab-content" style="display:none"></div>
       <div id="tab-rules"      class="tab-content" style="display:none"></div>
       <div id="tab-zones"      class="tab-content" style="display:none"></div>
+      <div id="tab-surcharges" class="tab-content" style="display:none"></div>
       <div id="tab-network"    class="tab-content" style="display:none"></div>
     </main>
   </div>
@@ -191,12 +196,45 @@ const CARRIERS = [
 // ═══════════════════════════════════════════════════
 // STATE
 // ═══════════════════════════════════════════════════
+// Zone-based surcharge rates (from template REGION_RATE_LOOKUP, Zone type)
+const DEFAULT_ZONE_SURCHARGES = {
+  UPS:{
+    OWSURCHARGE: {'1':33.53,'2':33.53,'3':36.6,'4':36.6,'5':40.57,'6':40.57,'7':42.37,'8':42.37},
+    ODSURCHARGES:{'1':21.63,'2':21.63,'3':23.98,'4':23.98,'5':27.76,'6':27.76,'7':29.21,'8':29.21},
+    LPSURCHARGES:{'1':217.3,'2':217.3,'3':238.5,'4':238.5,'5':265,'6':265,'7':265,'8':265},
+    Packaging:   {'1':19.3,'2':19.3,'3':22.36,'4':22.36,'5':23.98,'6':23.98,'7':24.34,'8':24.34},
+    UNAUTHORIZED:{'1':1457.5,'2':1457.5,'3':1457.5,'4':1457.5,'5':1457.5,'6':1457.5,'7':1457.5,'8':1457.5},
+  },
+  FEDEX:{
+    OWSURCHARGE: {'1':43.5,'2':43.5,'3':47.5,'4':47.5,'5':50.5,'6':50.5,'7':55,'8':55},
+    ODSURCHARGES:{'1':28,'2':28,'3':31,'4':31,'5':34,'6':34,'7':38,'8':38},
+    LPSURCHARGES:{'1':255,'2':255,'3':275,'4':275,'5':320,'6':320,'7':330,'8':330},
+    Packaging:   {'1':25,'2':25,'3':29,'4':29,'5':30.5,'6':30.5,'7':31.5,'8':31.5},
+    UNAUTHORIZED:{'1':1875,'2':1875,'3':1875,'4':1875,'5':1875,'6':1875,'7':1875,'8':1875},
+  }
+};
+const DEFAULT_THRESHOLDS = {
+  UPS:{
+    overweightLbs:50, addlHandlingLcm:121.92, addlHandlingWcm:76.2,
+    largePackageLcm:243.84, largePackageLGcm:330.2, unauthorizedLcm:274.32,
+    fuelSurcharge:0.1803, residentialFallback:3.35,
+  },
+  FEDEX:{
+    overweightLbs:50, addlHandlingLcm:121.92, addlHandlingWcm:76.2,
+    largePackageLcm:243.84, largePackageLGcm:330.2, unauthorizedLcm:274.32,
+    fuelSurcharge:0.055, residentialFallback:5.95,
+  }
+};
+
 let state = {
   shipments:[], results:[], zoneMap:{uniuni:{},usps:{}},
   rateData:JSON.parse(JSON.stringify(RATE_DATA)),
   rules:JSON.parse(JSON.stringify(RULES)),
   currentUser: null,
   calcPage:0,
+  dasMap:{},           // carrier → { surcharge_name → { zip5 → rate } }
+  zoneSurchargeMap:JSON.parse(JSON.stringify(DEFAULT_ZONE_SURCHARGES)),
+  surchargeThresholds:JSON.parse(JSON.stringify(DEFAULT_THRESHOLDS)),
 };
 
 // ═══════════════════════════════════════════════════
@@ -207,7 +245,7 @@ function saveUsers(u){localStorage.setItem('lm_users',JSON.stringify(u));}
 function isAdmin(){return state.currentUser?.role==='admin';}
 
 function initSession(){
-  loadSavedRules();
+  loadSavedRules();loadSavedSurchargeData();
   const saved=JSON.parse(localStorage.getItem('lm_session')||'null');
   if(saved){state.currentUser=saved;applyRole();return;}
   const users=loadUsers();
@@ -266,9 +304,9 @@ function applyRole(){
       <span class="badge ${admin?'badge-blue':'badge-gray'}" style="font-size:10px">${admin?'Admin':'Viewer'}</span>
       <button class="btn btn-sm" onclick="doLogout()" style="font-size:11px;padding:3px 10px">Logout</button>`;
   }
-  // Show Network Access nav only for admins
-  const nav=document.getElementById('nav-network');
-  if(nav)nav.style.display=admin?'':'none';
+  // Show admin-only nav items
+  const nav=document.getElementById('nav-network');if(nav)nav.style.display=admin?'':'none';
+  const navS=document.getElementById('nav-surcharges');if(navS)navS.style.display=admin?'':'none';
 }
 
 // ═══════════════════════════════════════════════════
@@ -279,6 +317,38 @@ function applyRole(){
 // ═══════════════════════════════════════════════════
 function saveRules(){localStorage.setItem('lm_rules',JSON.stringify(state.rules));}
 function loadSavedRules(){const s=localStorage.getItem('lm_rules');if(s)try{state.rules=JSON.parse(s);}catch(e){}}
+
+function saveSurchargeData(){
+  try{
+    localStorage.setItem('lm_dasmap',JSON.stringify(state.dasMap));
+    localStorage.setItem('lm_zonesur',JSON.stringify(state.zoneSurchargeMap));
+    localStorage.setItem('lm_surthr',JSON.stringify(state.surchargeThresholds));
+  }catch(e){show('Surcharge data too large for browser storage — ZIP map not saved','error');}
+}
+function loadSavedSurchargeData(){
+  try{
+    const dm=localStorage.getItem('lm_dasmap');if(dm)state.dasMap=JSON.parse(dm);
+    const zs=localStorage.getItem('lm_zonesur');if(zs){const d=JSON.parse(zs);Object.keys(d).forEach(k=>{if(!state.zoneSurchargeMap[k])state.zoneSurchargeMap[k]={};Object.assign(state.zoneSurchargeMap[k],d[k]);});}
+    const st=localStorage.getItem('lm_surthr');if(st){const d=JSON.parse(st);Object.keys(d).forEach(k=>{if(!state.surchargeThresholds[k])state.surchargeThresholds[k]={};Object.assign(state.surchargeThresholds[k],d[k]);});}
+  }catch(e){}
+}
+function setSurThr(carrier,key,val){
+  if(!state.surchargeThresholds[carrier])state.surchargeThresholds[carrier]={};
+  state.surchargeThresholds[carrier][key]=parseFloat(val)||0;
+  saveSurchargeData();
+}
+function setZoneSur(carrier,sname,zone,val){
+  if(!state.zoneSurchargeMap[carrier])state.zoneSurchargeMap[carrier]={};
+  if(!state.zoneSurchargeMap[carrier][sname])state.zoneSurchargeMap[carrier][sname]={};
+  state.zoneSurchargeMap[carrier][sname][zone]=parseFloat(val)||0;
+  saveSurchargeData();
+}
+function resetSurchargeData(carrier){
+  state.zoneSurchargeMap[carrier]=JSON.parse(JSON.stringify(DEFAULT_ZONE_SURCHARGES[carrier]||{}));
+  state.surchargeThresholds[carrier]=JSON.parse(JSON.stringify(DEFAULT_THRESHOLDS[carrier]||{}));
+  state.dasMap[carrier]={};
+  saveSurchargeData();renderSurcharges();show(`${carrier} surcharge data reset to defaults`);
+}
 
 function setRule(carrier,path,val){
   let obj=state.rules[carrier];
@@ -316,7 +386,27 @@ function calcCost(box,carrier){
   if(base==null)return{ok:false,reason:`No rate: ${chgLbs.toFixed(2)}lbs z${zone}`};
   const sur=[];
   if(carrier==='USPS_GA'||carrier==='USPS_PM'){const os=svc.oversize;if(sides[0]>os.L1.t)sur.push({n:'Oversize L1',a:os.L1.c});if(sides[1]>os.L2.t)sur.push({n:'Oversize L2',a:os.L2.c});if(sides[2]>os.L3.t)sur.push({n:'Oversize L3',a:os.L3.c});const ol=svc.overlength;if(sides[0]>ol.t&&sides[0]<=ol.limit)sur.push({n:'Overlength',a:ol.c});if(sides[0]>ol.limit)sur.push({n:'OverlengthLimit',a:ol.lc});if(vCin>svc.overvolume.t)sur.push({n:'Overvolume',a:svc.overvolume.c});}
-  if(carrier==='UPS'){if(grossKg<10)sur.push({n:'Residential',a:svc.rsc.c});if(gLbs>svc.overweight.t)sur.push({n:'Overweight',a:0,note:'Region-based'});if(sides[0]>svc.overdimension.L1||sides[1]>svc.overdimension.L2||lgCm>svc.overdimension.LG)sur.push({n:'Overdimension',a:0,note:'Region-based'});if(sides[0]>svc.largePackage.L1||lgCm>svc.largePackage.LG)sur.push({n:'Large Package',a:0});if(sides[0]>svc.packaging.L1||sides[1]>svc.packaging.L2)sur.push({n:'Packaging',a:0,note:'Region-based'});const sub=base+sur.reduce((s,x)=>s+(x.a||0),0);sur.push({n:'Fuel (18.03%)',a:+(sub*svc.fuelSurcharge).toFixed(2)});}
+  if(carrier==='UPS'){
+    const thr=state.surchargeThresholds.UPS||DEFAULT_THRESHOLDS.UPS;
+    const zs=state.zoneSurchargeMap.UPS||{};
+    const dm=state.dasMap.UPS||{};
+    const zStr=String(zone);const zip5=String(postal).padStart(5,'0');
+    // DAS/EDAS — ZIP-based lookup
+    const dasTypes=['DAS Residential','DAS Commercial','EDAS Residential','EDAS Commercial','Remote Area'];
+    const hasDasData=dasTypes.some(t=>Object.keys(dm[t]||{}).length>0);
+    if(hasDasData){
+      for(const dt of dasTypes){const r=dm[dt]?.[zip5];if(r!=null){sur.push({n:dt,a:+r.toFixed(2)});break;}}
+    }else{if(grossKg<10)sur.push({n:'Residential',a:thr.residentialFallback||3.35});}
+    // Dimensional/weight surcharges — zone-based rates, exclusive hierarchy
+    const owT=thr.overweightLbs||50;const addlL=thr.addlHandlingLcm||121.92;const addlW=thr.addlHandlingWcm||76.2;
+    const lpL=thr.largePackageLcm||243.84;const lpLG=thr.largePackageLGcm||330.2;const unL=thr.unauthorizedLcm||274.32;
+    if(sides[0]>unL||gLbs>150){sur.push({n:'Unauthorized',a:+(zs.UNAUTHORIZED?.[zStr]||1457.5)});}
+    else if(sides[0]>lpL||lgCm>lpLG){sur.push({n:'Large Package',a:+(zs.LPSURCHARGES?.[zStr]||0)});}
+    else if(gLbs>owT){sur.push({n:'Overweight',a:+(zs.OWSURCHARGE?.[zStr]||0)});}
+    else if(sides[0]>addlL||sides[1]>addlW){sur.push({n:'Addl Handling (Dim)',a:+(zs.ODSURCHARGES?.[zStr]||0)});}
+    const sub=base+sur.reduce((s,x)=>s+(x.a||0),0);
+    sur.push({n:`Fuel (${((thr.fuelSurcharge||svc.fuelSurcharge)*100).toFixed(2)}%)`,a:+(sub*(thr.fuelSurcharge||svc.fuelSurcharge)).toFixed(2)});
+  }
   const surT=sur.reduce((s,x)=>s+(x.a||0),0);
   return{ok:true,carrier,zone,chgLbs:+chgLbs.toFixed(4),volLbs:+volLbs.toFixed(4),unit:isOz?'OZ':'LBS',base,sur,surT:+surT.toFixed(2),total:+(base+surT).toFixed(2)};
 }
@@ -873,13 +963,192 @@ function renderNetwork(){
 }
 
 // ═══════════════════════════════════════════════════
+// DAS & SURCHARGES TAB
+// ═══════════════════════════════════════════════════
+async function handleRegionFile(e){
+  const f=e.target.files[0];if(!f)return;
+  try{
+    show('Parsing surcharge file…');
+    const buf=await f.arrayBuffer();
+    const rows=parseXlsx(new Uint8Array(buf));
+    let zipCnt=0,zoneCnt=0;
+    rows.forEach(r=>{
+      const carrier=String(r.carrier||r.Carrier||'');
+      const sname=String(r.surcharge_name||r['Surcharge Name']||r.surcharge||'');
+      const stype=String(r.surcharge_type||r['Surcharge Type']||'').toLowerCase();
+      const sval=String(r.surcharge_value||r['Surcharge Value']||r.value||'');
+      const rate=parseFloat(r.rate||r.Rate||0);
+      if(!carrier||!sname||!sval||!rate)return;
+      if(stype.includes('zip')||stype.includes('postal')){
+        if(!state.dasMap[carrier])state.dasMap[carrier]={};
+        if(!state.dasMap[carrier][sname])state.dasMap[carrier][sname]={};
+        state.dasMap[carrier][sname][sval.toString().padStart(5,'0')]=rate;
+        zipCnt++;
+      }else if(stype.includes('zone')){
+        if(!state.zoneSurchargeMap[carrier])state.zoneSurchargeMap[carrier]={};
+        if(!state.zoneSurchargeMap[carrier][sname])state.zoneSurchargeMap[carrier][sname]={};
+        state.zoneSurchargeMap[carrier][sname][sval]=rate;
+        zoneCnt++;
+      }
+    });
+    saveSurchargeData();renderSurcharges();
+    show(`${zipCnt.toLocaleString()} ZIP entries + ${zoneCnt} zone rates loaded from ${f.name}`);
+  }catch(err){show('Failed: '+err.message,'error');}
+}
+
+function renderSurcharges(){
+  const el=$('#tab-surcharges');
+  const admin=isAdmin();
+  const SUR_CARRIERS=[
+    {key:'UPS',label:'UPS Ground',color:'#e65100'},
+    {key:'FEDEX',label:'FedEx Ground',color:'#4d148c'},
+  ];
+  const ZONE_LABELS={
+    OWSURCHARGE:'Overweight (>threshold)',
+    ODSURCHARGES:'Addl Handling — Dimension',
+    LPSURCHARGES:'Large Package Surcharge',
+    Packaging:'Packaging Surcharge',
+    UNAUTHORIZED:'Unauthorized / Over Max',
+  };
+  const THR_LABELS={
+    overweightLbs:['Overweight trigger','lbs'],
+    addlHandlingLcm:['Addl Handling longest side','cm (48 in = 121.92)'],
+    addlHandlingWcm:['Addl Handling 2nd side','cm (30 in = 76.2)'],
+    largePackageLcm:['Large Package longest side','cm (96 in = 243.84)'],
+    largePackageLGcm:['Large Package L+Girth','cm (130 in = 330.2)'],
+    unauthorizedLcm:['Unauthorized longest side','cm (108 in = 274.32)'],
+    fuelSurcharge:['Fuel Surcharge','decimal (0.1803 = 18.03%)'],
+    residentialFallback:['Residential fallback rate','$ (used when no DAS ZIP data)'],
+  };
+  const ni=(c,k,v,s)=>admin
+    ?`<input class="inp" type="number" style="width:88px;display:inline;padding:4px 7px;font-size:12px" value="${v}" step="any" onchange="setSurThr('${c}','${k}',this.value)"/> <span style="font-size:11px;color:var(--text2)">${s}</span>`
+    :`<span class="mono" style="font-size:12px">${v}</span> <span style="font-size:11px;color:var(--text2)">${s}</span>`;
+
+  el.innerHTML=`
+    <div style="display:flex;gap:8px;margin-bottom:20px;align-items:center">
+      <h2 style="font-size:18px;font-weight:600;flex:1">DAS & Regional Surcharges</h2>
+      ${admin?`<span class="badge badge-blue" style="font-size:11px">Editing enabled</span>`:''}
+    </div>
+
+    <!-- Upload -->
+    ${admin?`
+    <div class="card" style="margin-bottom:20px">
+      <div class="card-title">Upload REGION_RATE_LOOKUP File</div>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:12px">
+        Expected columns: <span class="mono">carrier, service, surcharge_name, surcharge_type (Zipcode/Zone), surcharge_value, rate</span>
+      </div>
+      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+        <div class="upload-zone" style="flex:1;padding:14px 20px;min-width:220px;display:flex;align-items:center;gap:12px" onclick="$('#region-input').click()">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          <div><div style="font-size:13px;font-weight:500">Upload REGION_RATE_LOOKUP</div><div style="font-size:11px;color:var(--text2)">Excel or CSV — ZIP-based DAS/EDAS + zone-based OW/OD/LP rates</div></div>
+        </div>
+        <input type="file" id="region-input" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleRegionFile(event)"/>
+        <div style="font-size:12px;color:var(--text2)">
+          ${Object.entries(state.dasMap).map(([c,m])=>
+            Object.entries(m).map(([sn,zips])=>`<div><strong>${c} · ${sn}:</strong> ${Object.keys(zips).length.toLocaleString()} ZIPs</div>`).join('')
+          ).join('')||'<em>No ZIP data loaded yet</em>'}
+        </div>
+      </div>
+    </div>`:''}
+
+    <!-- Per-carrier cards -->
+    ${SUR_CARRIERS.map(sc=>{
+      const thr=state.surchargeThresholds[sc.key]||{};
+      const zs=state.zoneSurchargeMap[sc.key]||{};
+      const dm=state.dasMap[sc.key]||{};
+      const dasLoaded=Object.values(dm).some(m=>Object.keys(m).length>0);
+      const zones=['1','2','3','4','5','6','7','8'];
+      return`
+      <div class="card" style="margin-bottom:20px">
+        <div class="rules-carrier-header" style="margin-bottom:14px">
+          <div class="carrier-dot" style="background:${sc.color}"></div>
+          <span style="font-weight:600;font-size:15px">${sc.label}</span>
+          ${admin?`<button class="btn btn-sm btn-danger" style="margin-left:auto;font-size:11px" onclick="resetSurchargeData('${sc.key}')">Reset Defaults</button>`:''}
+        </div>
+
+        <!-- DAS/EDAS ZIP status -->
+        <div style="margin-bottom:14px">
+          <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:8px;text-transform:uppercase;letter-spacing:.4px">ZIP-Based Surcharges (DAS / EDAS / Remote)</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            ${['DAS Residential','DAS Commercial','EDAS Residential','EDAS Commercial','Remote Area'].map(sn=>{
+              const cnt=Object.keys(dm[sn]||{}).length;
+              const rate=Object.values(dm[sn]||{})[0];
+              return`<div style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 12px;min-width:130px">
+                <div style="font-size:11px;color:var(--text2);font-weight:500">${sn}</div>
+                <div style="font-size:16px;font-weight:700;color:${cnt?'var(--teal)':'var(--text3)'}">${cnt?cnt.toLocaleString():'-'}</div>
+                <div style="font-size:11px;color:var(--text2)">${cnt?`ZIPs · $${rate?.toFixed(2)||'?'}/pkg`:dasLoaded?'Not in data':'Upload to enable'}</div>
+              </div>`;
+            }).join('')}
+          </div>
+          ${!dasLoaded?`<div style="margin-top:8px;font-size:12px;color:var(--orange)">⚠ No ZIP data — using fallback residential rate ($${(thr.residentialFallback||3.35).toFixed(2)}) for packages &lt; 10kg</div>`:''}
+        </div>
+
+        <!-- Thresholds -->
+        <div style="margin-bottom:14px">
+          <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:8px;text-transform:uppercase;letter-spacing:.4px">Surcharge Trigger Thresholds</div>
+          <table style="width:100%;border-collapse:collapse">
+            <colgroup><col style="width:42%"/><col/></colgroup>
+            <tbody>
+              ${Object.entries(THR_LABELS).map(([k,[label,unit]],i)=>`
+              <tr style="${i%2?'background:var(--surface2)':''}">
+                <td style="padding:7px 12px;font-size:12px;color:var(--text2)">${label}</td>
+                <td style="padding:7px 12px">${ni(sc.key,k,thr[k]??DEFAULT_THRESHOLDS[sc.key]?.[k]??'',unit)}</td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Zone-based surcharge rates (editable grid) -->
+        <div>
+          <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:8px;text-transform:uppercase;letter-spacing:.4px">Zone-Based Surcharge Rates ($)</div>
+          <div style="overflow-x:auto">
+            <table style="width:100%;border-collapse:collapse;font-size:12px">
+              <thead>
+                <tr style="background:var(--surface2)">
+                  <th style="padding:8px 12px;text-align:left;font-size:11px;color:var(--text2);white-space:nowrap">Surcharge Type</th>
+                  ${zones.map(z=>`<th style="padding:8px 12px;text-align:right;font-size:11px;color:var(--text2)">Zone ${z}</th>`).join('')}
+                </tr>
+              </thead>
+              <tbody>
+                ${Object.entries(ZONE_LABELS).map(([sn,label],ri)=>{
+                  const rates=zs[sn]||{};
+                  return`<tr style="${ri%2?'background:var(--surface2)':''}">
+                    <td style="padding:7px 12px;color:var(--text2);font-size:12px;white-space:nowrap">${label}</td>
+                    ${zones.map(z=>`<td style="padding:4px 6px;text-align:right">
+                      ${admin
+                        ?`<input class="inp" type="number" style="width:68px;padding:3px 6px;font-size:11px;text-align:right" value="${rates[z]??''}" step="0.01" placeholder="-" onchange="setZoneSur('${sc.key}','${sn}','${z}',this.value)"/>`
+                        :`<span class="mono" style="font-size:12px">${rates[z]!=null?'$'+rates[z]:'-'}</span>`
+                      }
+                    </td>`).join('')}
+                  </tr>`;
+                }).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>`;
+    }).join('')}
+
+    <!-- Info card -->
+    <div class="card" style="background:var(--blue-bg);border-color:#b3d4f0">
+      <div style="font-size:13px;color:var(--blue);font-weight:600;margin-bottom:6px">How surcharges are applied</div>
+      <div style="font-size:12px;color:var(--text2);line-height:1.8">
+        <strong>DAS/EDAS/Remote:</strong> ZIP code is looked up against uploaded data. If found, the surcharge is added. Only one DAS tier applies per shipment.<br>
+        <strong>Overweight / Addl Handling / Large Package / Unauthorized:</strong> Applied based on thresholds above. These are mutually exclusive — only the highest tier applies.<br>
+        <strong>Fuel:</strong> Applied last, calculated as % of (base + all other surcharges).<br>
+        <strong>Packaging surcharge:</strong> Not auto-detected. To apply it, add a column <span class="mono">packaging_surcharge=yes</span> to your shipment file (coming soon).
+      </div>
+    </div>
+  `;
+}
+// ═══════════════════════════════════════════════════
 // EVENT HANDLERS
 // ═══════════════════════════════════════════════════
 function switchTab(el,tab){
   $$('.nav-item').forEach(x=>x.classList.remove('active'));el.classList.add('active');
   $$('.tab-content').forEach(x=>x.style.display='none');
   $(`#tab-${tab}`).style.display='';
-  ({calculator:renderCalculator,rates:renderRates,rules:renderRules,zones:renderZones,analysis:renderAnalysis,network:renderNetwork})[tab]?.();
+  ({calculator:renderCalculator,rates:renderRates,rules:renderRules,zones:renderZones,analysis:renderAnalysis,surcharges:renderSurcharges,network:renderNetwork})[tab]?.();
 }
 
 function setMode(mode,btn){
