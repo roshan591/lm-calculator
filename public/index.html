@@ -362,11 +362,59 @@ function show(msg,type='success'){
   clearTimeout(el._t);el._t=setTimeout(()=>{el.style.display='none';},3500);
 }
 
+function csvEsc(v){const s=String(v??'');return(s.includes(',')||s.includes('"')||s.includes('\n'))?`"${s.replace(/"/g,'""')}"`:`${s}`;}
+function csvRow(arr){return arr.map(csvEsc).join(',');}
+
 function exportCSV(){
-  const rows=[['Box ID','Postal','Marketplace','Allocated Carrier','Total $','USPS GA $','USPS PM $','UniUni $','UPS $','Zone','Chg Wt (lbs)','Vol Wt (lbs)','Unit','Base Rate','Surcharge Total','Surcharges Applied']];
-  state.results.forEach(r=>{const g=k=>r.costs.find(c=>c.carrier===k);const a=r.cheapest;rows.push([r.box.boxId,r.box.postal,r.box.marketplace,a?CARRIERS.find(c=>c.key===a.carrier)?.label:'None',a?.total??'',g('USPS_GA')?.ok?g('USPS_GA').total:'N/A',g('USPS_PM')?.ok?g('USPS_PM').total:'N/A',g('UNIUNI')?.ok?g('UNIUNI').total:'N/A',g('UPS')?.ok?g('UPS').total:'N/A',a?.zone??'',a?.chgLbs??'',a?.volLbs??'',a?.unit??'',a?.base??'',a?.surT??'',a?.sur?.map(s=>`${s.n}$${s.a}`).join('|')??'']);});
-  const csv=rows.map(r=>r.map(v=>String(v).includes(',')?`"${v}"`:v).join(',')).join('\n');
-  const a=document.createElement('a');a.href='data:text/csv,'+encodeURIComponent(csv);a.download='lm_costing_'+new Date().toISOString().slice(0,10)+'.csv';a.click();
+  const hdr=['Box ID','AWB','Postal','Marketplace','Allocated Carrier','Total ($)','USPS GA ($)','USPS PM ($)','UniUni ($)','UPS ($)','Zone','Chg Wt (lbs)','Vol Wt (lbs)','Unit','Base Rate','Surcharge Total','Surcharges Applied'];
+  const body=state.results.map(r=>{const g=k=>r.costs.find(c=>c.carrier===k);const a=r.cheapest;return csvRow([r.box.boxId,r.box.awb,r.box.postal,r.box.marketplace,a?CARRIERS.find(c=>c.key===a.carrier)?.label:'None',a?.total??'',g('USPS_GA')?.ok?g('USPS_GA').total:'N/A',g('USPS_PM')?.ok?g('USPS_PM').total:'N/A',g('UNIUNI')?.ok?g('UNIUNI').total:'N/A',g('UPS')?.ok?g('UPS').total:'N/A',a?.zone??'',a?.chgLbs??'',a?.volLbs??'',a?.unit??'',a?.base??'',a?.surT??'',a?.sur?.map(s=>`${s.n}=$${s.a}`).join('|')??'']);});
+  const csv=[csvRow(hdr),...body].join('\n');
+  const a=document.createElement('a');a.href='data:text/csv,'+encodeURIComponent(csv);a.download='lm_summary_'+new Date().toISOString().slice(0,10)+'.csv';a.click();
+}
+
+function exportDetailedCSV(){
+  // One row per shipment with full per-carrier breakdown
+  const cCols=key=>[
+    `${key} Eligible`,`${key} Reason`,`${key} Zone`,
+    `${key} Gross Wt (lbs)`,`${key} Vol Wt (lbs)`,`${key} Vol Factor`,
+    `${key} Unit`,`${key} Base Rate ($)`,
+    `${key} Surcharges (detail)`,`${key} Surcharge Total ($)`,`${key} Final Cost ($)`,
+  ];
+  const hdr=[
+    'Box ID','AWB','Postal','Marketplace','Gross Wt (kg)','L (cm)','W (cm)','H (cm)',
+    'Cheapest Carrier','Cheapest Cost ($)',
+    ...cCols('USPS GA'),...cCols('USPS PM'),...cCols('UniUni'),...cCols('UPS'),
+  ];
+  const vf={USPS_GA:state.rules.USPS_GA.volFactor,USPS_PM:state.rules.USPS_PM.volFactor,UNIUNI:state.rules.UNIUNI.volFactor,UPS:state.rules.UPS.volFactor};
+  const cData=(costs,key)=>{
+    const c=costs.find(x=>x.carrier===key);
+    if(!c)return['','','','','','','','','','',''];
+    const surDetail=(c.sur||[]).map(s=>`${s.n}${s.a?'=$'+s.a.toFixed(2):s.note?'('+s.note+')':''}`).join(' | ');
+    return[
+      c.ok?'Yes':'No',
+      c.ok?'':(c.reason||''),
+      c.zone??'',
+      c.ok?(c.chgLbs??''):'',
+      c.ok?(c.volLbs??''):'',
+      c.ok?vf[key]:'',
+      c.unit??'',
+      c.base??'',
+      surDetail,
+      c.surT??'',
+      c.total??'',
+    ];
+  };
+  const body=state.results.map(r=>{
+    const b=r.box;const a=r.cheapest;
+    return csvRow([
+      b.boxId,b.awb,b.postal,b.marketplace,b.grossKg,b.L_cm,b.W_cm,b.H_cm,
+      a?CARRIERS.find(c=>c.key===a.carrier)?.label:'No carrier',a?.total??'',
+      ...cData(r.costs,'USPS_GA'),...cData(r.costs,'USPS_PM'),
+      ...cData(r.costs,'UNIUNI'),...cData(r.costs,'UPS'),
+    ]);
+  });
+  const csv=[csvRow(hdr),...body].join('\n');
+  const a=document.createElement('a');a.href='data:text/csv,'+encodeURIComponent(csv);a.download='lm_detailed_'+new Date().toISOString().slice(0,10)+'.csv';a.click();
 }
 
 function downloadTemplate(type){
@@ -466,7 +514,8 @@ function renderCalculator(){
     <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center">
       <h2 style="font-size:18px;font-weight:600;flex:1">Cost Calculator</h2>
       <button class="btn btn-sm" onclick="downloadTemplate('shipment')">${DL_ICON} Download Template</button>
-      ${r.length>0?`<button class="btn btn-sm" onclick="exportCSV()">Export CSV</button>`:''}
+      ${r.length>0?`<button class="btn btn-sm" onclick="exportCSV()" title="Summary — one row per box">Export Summary</button>`:''}
+      ${r.length>0?`<button class="btn btn-primary btn-sm" onclick="exportDetailedCSV()" title="Full breakdown — zone, vol factor, base rate, each surcharge per carrier">${DL_ICON} Download Detailed</button>`:''}
     </div>
 
     <div class="card">
