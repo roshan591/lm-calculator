@@ -194,7 +194,9 @@ const CARRIERS = [
 let state = {
   shipments:[], results:[], zoneMap:{uniuni:{},usps:{}},
   rateData:JSON.parse(JSON.stringify(RATE_DATA)),
+  rules:JSON.parse(JSON.stringify(RULES)),
   currentUser: null,
+  calcPage:0,
 };
 
 // ═══════════════════════════════════════════════════
@@ -205,6 +207,7 @@ function saveUsers(u){localStorage.setItem('lm_users',JSON.stringify(u));}
 function isAdmin(){return state.currentUser?.role==='admin';}
 
 function initSession(){
+  loadSavedRules();
   const saved=JSON.parse(localStorage.getItem('lm_session')||'null');
   if(saved){state.currentUser=saved;applyRole();return;}
   const users=loadUsers();
@@ -271,16 +274,35 @@ function applyRole(){
 // ═══════════════════════════════════════════════════
 // ENGINE
 // ═══════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════
+// RULES MANAGEMENT
+// ═══════════════════════════════════════════════════
+function saveRules(){localStorage.setItem('lm_rules',JSON.stringify(state.rules));}
+function loadSavedRules(){const s=localStorage.getItem('lm_rules');if(s)try{state.rules=JSON.parse(s);}catch(e){}}
+
+function setRule(carrier,path,val){
+  let obj=state.rules[carrier];
+  const parts=path.split('.');
+  for(let i=0;i<parts.length-1;i++)obj=obj[parts[i]];
+  const last=parts[parts.length-1];
+  const n=parseFloat(val);
+  obj[last]=isNaN(n)?val:n;
+  saveRules();
+}
+function setPoAddress(carrier,val){state.rules[carrier].poAddress=val;saveRules();}
+function setMarketplaces(carrier,val){state.rules[carrier].marketplaces=val.split(',').map(s=>s.trim()).filter(Boolean);saveRules();}
+function resetCarrierRules(carrier){state.rules[carrier]=JSON.parse(JSON.stringify(RULES[carrier]));saveRules();renderRules();show(`${carrier} rules reset to defaults`);}
+
 function uspsZone(z){const p=parseInt(String(z).padStart(5,'0').slice(0,3));if(p<=119||(p>=180&&p<=191))return 2;if((p>=120&&p<=149)||(p>=192&&p<=269))return 3;if((p>=150&&p<=179)||(p>=270&&p<=289)||(p>=430&&p<=499)||(p>=530&&p<=549))return 4;if((p>=290&&p<=349)||(p>=400&&p<=429)||(p>=500&&p<=529)||(p>=550&&p<=599)||(p>=600&&p<=629)||(p>=460&&p<=479))return 5;if((p>=350&&p<=399)||(p>=630&&p<=693)||(p>=700&&p<=729))return 6;if((p>=730&&p<=799)||(p>=570&&p<=589)||(p>=800&&p<=816)||(p>=820&&p<=839)||(p>=870&&p<=888))return 7;return 8;}
 function getRate(rd,svc,zone,wt,unit){const t=rd[svc];if(!t)return null;const z=String(zone);if(unit==='OZ'){const oz=t.oz?.[z];if(oz)return oz[String(Math.min(Math.ceil(wt),16))]??null;}const lb=t.lbs?.[z];if(!lb)return null;const keys=Object.keys(lb).map(Number).sort((a,b)=>a-b);const k=keys.filter(k=>k<=Math.ceil(wt));return k.length?lb[String(k[k.length-1])]:null;}
 function isMpSvc(rules,carrier,mp){const svc=rules[carrier];if(!svc)return false;const m=(mp||'').toLowerCase();const mps=svc.marketplaces.map(x=>x.toLowerCase());if(mps.includes(m))return true;if(m==='etsy_usa'&&mps.includes('etsy'))return true;if(carrier==='UNIUNI'&&m==='amazon fba'&&mps.includes('amazon'))return true;if(mps.includes('other'))return true;return false;}
 function calcCost(box,carrier){
-  const svc=RULES[carrier];if(!svc)return{ok:false,reason:'Unknown carrier'};
+  const svc=state.rules[carrier];if(!svc)return{ok:false,reason:'Unknown carrier'};
   const{grossKg,L_cm,W_cm,H_cm,postal,marketplace,isPO}=box;
   const gLbs=grossKg*2.20462;const Li=L_cm/2.54,Wi=W_cm/2.54,Hi=H_cm/2.54;
   const vCin=Li*Wi*Hi;const sides=[L_cm,W_cm,H_cm].sort((a,b)=>b-a);
   const lgCm=sides[0]+2*(sides[1]+sides[2]);
-  if(!isMpSvc(RULES,carrier,marketplace))return{ok:false,reason:'MP not serviceable'};
+  if(!isMpSvc(state.rules,carrier,marketplace))return{ok:false,reason:'MP not serviceable'};
   if(isPO&&!svc.poAddress)return{ok:false,reason:'PO Box not serviceable'};
   let zone;
   if(carrier==='UNIUNI'){const zk=String(postal).padStart(5,'0');zone=state.zoneMap.uniuni[zk]??null;if(!zone)return{ok:false,reason:'ZIP not in UniUni coverage'};}
@@ -305,8 +327,18 @@ function runCalc(src){return src.map(box=>{const costs=CARRIERS.map(c=>calcCost(
 // ═══════════════════════════════════════════════════
 function parseXlsx(buf,hint){const wb=XLSX.read(buf,{type:'array',cellDates:true});const name=hint?wb.SheetNames.find(n=>n.toLowerCase().includes(hint.toLowerCase()))||wb.SheetNames[0]:wb.SheetNames[0];return XLSX.utils.sheet_to_json(wb.Sheets[name],{defval:null});}
 function mapRow(row){
-  const g=names=>{for(const n of names){const k=Object.keys(row).find(k=>k.toLowerCase().trim()===n);if(k&&row[k]!=null)return row[k];}return null;};
-  return{awb:String(g(['awb','tracking'])||''),boxId:String(g(['boxes','box_id','box id'])||''),grossKg:parseFloat(g(['gross weight','grossweight','gross_weight'])||0),L_cm:parseFloat(g(['length','l cm','l_cm'])||0),W_cm:parseFloat(g(['width','w cm','w_cm'])||0),H_cm:parseFloat(g(['height','h cm','h_cm'])||0),postal:String(g(['reciever postal code','postal code','zip','zipcode','receiver postal code'])||'').replace(/[^0-9]/g,'').padStart(5,'0'),marketplace:String(g(['market_place','marketplace','market place'])||''),isPO:String(g(['is po address','is_po_address'])||'no').toLowerCase()==='yes'};
+  const norm=s=>s.toLowerCase().replace(/[^a-z0-9]/g,'');
+  const g=names=>{
+    const nns=names.map(norm);
+    for(const k of Object.keys(row)){
+      const nk=norm(k);
+      if(nns.some(nn=>nk===nn||nk.startsWith(nn)||nn.startsWith(nk))){
+        if(row[k]!=null&&row[k]!=='')return row[k];
+      }
+    }
+    return null;
+  };
+  return{awb:String(g(['awb','tracking number','trackingnumber'])||''),boxId:String(g(['boxes','box_id','box id','boxid'])||''),grossKg:parseFloat(g(['gross weight','grossweight','gross_weight','weight kg','weightkg','gross kg','grosskg'])||0),L_cm:parseFloat(g(['length','l cm','lcm','l_cm','length cm','lengthcm','length(cm)'])||0),W_cm:parseFloat(g(['width','w cm','wcm','w_cm','width cm','widthcm','width(cm)'])||0),H_cm:parseFloat(g(['height','h cm','hcm','h_cm','height cm','heightcm','height(cm)'])||0),postal:String(g(['reciever postal code','receiver postal code','postal code','zip code','zipcode','zip','postalcode','destination zip'])||'').replace(/[^0-9]/g,'').padStart(5,'0'),marketplace:String(g(['market_place','marketplace','market place','marketplace name'])||''),isPO:String(g(['is po address','is_po_address','po address','po box'])||'no').toLowerCase()==='yes'};
 }
 
 // ═══════════════════════════════════════════════════
@@ -415,6 +447,12 @@ function renderCalculator(){
   const admin=isAdmin();
   const totalCost=r.filter(x=>x.cheapest).reduce((s,x)=>s+(x.cheapest.total||0),0);
   const carriers=CARRIERS.map(c=>({...c,count:r.filter(x=>x.cheapest?.carrier===c.key).length}));
+  const PAGE=200;
+  const totalPages=r.length?Math.ceil(r.length/PAGE):1;
+  const pg=Math.min(Math.max(state.calcPage||0,0),totalPages-1);
+  state.calcPage=pg;
+  const pStart=pg*PAGE,pEnd=Math.min(pStart+PAGE,r.length);
+  const pageRows=r.slice(pStart,pEnd);
 
   el.innerHTML=`
     <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center">
@@ -472,11 +510,19 @@ function renderCalculator(){
       <div class="metric-card"><div class="metric-label">Avg Cost/Box</div><div class="metric-value">$${r.filter(x=>x.cheapest).length?(totalCost/r.filter(x=>x.cheapest).length).toFixed(2):'-'}</div></div>
       ${carriers.map(c=>`<div class="metric-card"><div class="metric-label" style="color:${c.color}">${c.label.replace('USPS ','').replace(' Ground','')}</div><div class="metric-value" style="color:${c.color}">${c.count}</div></div>`).join('')}
     </div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+      <span style="font-size:12px;color:var(--text2)">Showing <strong>${r.length?pStart+1:0}–${pEnd}</strong> of <strong>${r.length}</strong> rows</span>
+      <div style="margin-left:auto;display:flex;gap:4px;align-items:center">
+        ${pg>0?`<button class="btn btn-sm" onclick="state.calcPage=${pg-1};renderCalculator()">← Prev</button>`:''}
+        <span style="font-size:12px;color:var(--text2);padding:0 4px">Page ${pg+1} / ${totalPages}</span>
+        ${pg<totalPages-1?`<button class="btn btn-sm" onclick="state.calcPage=${pg+1};renderCalculator()">Next →</button>`:''}
+      </div>
+    </div>
     <div class="tbl-wrap" style="max-height:500px;overflow-y:auto">
       <table>
         <thead><tr><th>Box ID</th><th>AWB</th><th>Postal</th><th>Marketplace</th><th>Allocated Carrier</th><th>Cost $</th><th>USPS GA</th><th>USPS PM</th><th>UniUni</th><th>UPS</th><th>Zone</th><th>Chg Wt (lbs)</th><th>Unit</th><th>Surcharges</th></tr></thead>
         <tbody>
-          ${r.map((row,i)=>{const g=k=>row.costs.find(c=>c.carrier===k);const a=row.cheapest;const C=a?CARRIERS.find(c=>c.key===a.carrier):null;
+          ${pageRows.map((row,i)=>{const g=k=>row.costs.find(c=>c.carrier===k);const a=row.cheapest;const C=a?CARRIERS.find(c=>c.key===a.carrier):null;
             return`<tr>
               <td class="mono">${row.box.boxId||'-'}</td>
               <td class="mono" style="max-width:120px;overflow:hidden;text-overflow:ellipsis">${row.box.awb||'-'}</td>
@@ -544,27 +590,53 @@ function renderRates(){
 
 function renderRules(){
   const el=$('#tab-rules');
-  const rulesRows={
-    USPS_GA:[['Vol Factor','166 cu.in/lb'],['Vol Threshold','1,728 cu.in — below this no vol weight'],['Max Weight','70 lbs'],['Oversize L1','>55cm → +$3.00'],['Oversize L2','>45cm → +$3.00'],['Oversize L3','>38cm → +$3.00'],['Overlength','55–76cm → +$4.50 | >76cm → +$10.00'],['Overvolume','>3,456 cu.in → +$21.00'],['Serviceable MPs','Amazon, Other, Ebay, Etsy, Amazon FBA, Tiktok, Alibris, Walmart, FAIRE'],['PO Box','Yes']],
-    USPS_PM:[['Vol Factor','166 cu.in/lb'],['Vol Threshold','1,728 cu.in'],['Max Weight','40 lbs'],['Oversize L1','>55cm → +$3.00'],['Oversize L2','>45cm → +$3.00'],['Oversize L3','>38cm → +$3.00'],['Overlength','55–76cm → +$4.50 | >76cm → +$21.00'],['Overvolume','>3,456 cu.in → +$35.00'],['Serviceable MPs','Amazon, Other, Ebay, Etsy, Amazon FBA, Tiktok, Alibris, Walmart'],['PO Box','Yes']],
-    UNIUNI:[['Vol Factor','194 cu.in/lb (always applied)'],['Max Weight','30 lbs'],['Max Longest Side','20 inches'],['Max Volume','1,728 cu.in'],['Serviceable MPs','Amazon, Other, Tiktok, Alibris, Walmart'],['PO Box','No']],
-    UPS:[['Vol Factor','225 cu.in/lb (always applied)'],['Max Weight','150 lbs'],['Residential Surcharge','$3.35 if gross weight < 10kg'],['Overweight','>50 lbs → region-based surcharge'],['Overdimension','L1>121cm OR L2>76cm OR L+G>266cm → region-based'],['Large Package','L1>243cm OR L+G>330cm → region-based'],['Fuel Surcharge','18.03% on base + fixed surcharges'],['DAS','ZIP-based — $3.18 standard / $5.22 extended'],['Serviceable MPs','Amazon, Other, Ebay, Etsy, Amazon FBA, Tiktok, Alibris, Walmart, FAIRE'],['PO Box','No']]
+  const admin=isAdmin();
+  const R=state.rules;
+  const ni=(c,path,v,suffix)=>{
+    const s=suffix?` <span style="font-size:11px;color:var(--text2)">${suffix}</span>`:'';
+    if(!admin)return`<span class="mono" style="font-size:12px">${v}</span>${s}`;
+    return`<input class="inp" type="number" style="width:82px;display:inline;padding:4px 7px;font-size:12px" value="${v}" step="any" onchange="setRule('${c}','${path}',this.value)"/>${s}`;
   };
+  const rw=(label,content,alt)=>`<tr style="${alt?'background:var(--surface2)':''}"><td style="color:var(--text2);font-size:12px;padding:8px 12px;white-space:nowrap;width:38%">${label}</td><td style="padding:8px 12px">${content}</td></tr>`;
   el.innerHTML=`
     <div style="display:flex;gap:8px;margin-bottom:20px;align-items:center">
       <h2 style="font-size:18px;font-weight:600;flex:1">Rules & Surcharges</h2>
+      ${admin?`<span class="badge badge-blue" style="font-size:11px">Editing enabled</span>`:'<span class="badge badge-gray" style="font-size:11px">View only</span>'}
       <button class="btn btn-sm" onclick="downloadTemplate('rules')">${DL_ICON} Download Reference</button>
     </div>
-    ${CARRIERS.map(c=>`
+    ${CARRIERS.map(c=>{const r=R[c.key];return`
     <div class="card">
-      <div class="rules-carrier-header">
+      <div class="rules-carrier-header" style="margin-bottom:12px">
         <div class="carrier-dot" style="background:${c.color}"></div>
         <span style="font-weight:600;font-size:15px">${c.label}</span>
+        ${admin?`<button class="btn btn-sm btn-danger" style="margin-left:auto;font-size:11px" onclick="resetCarrierRules('${c.key}')">Reset Defaults</button>`:''}
       </div>
-      <table><thead><tr><th style="width:35%">Rule</th><th>Value / Condition</th></tr></thead>
-        <tbody>${rulesRows[c.key].map(([rule,val],i)=>`<tr style="${i%2?'background:var(--surface2)':''}"><td style="color:var(--text2);font-size:12px">${rule}</td><td class="mono">${val}</td></tr>`).join('')}</tbody>
+      <table style="width:100%;border-collapse:collapse">
+        <colgroup><col style="width:40%"/><col/></colgroup>
+        <tbody>
+          ${rw('Vol Factor',ni(c.key,'volFactor',r.volFactor,'cu.in per lb'),false)}
+          ${r.volThreshold!==undefined?rw('Vol Threshold',ni(c.key,'volThreshold',r.volThreshold,'cu.in (0 = always apply)'),true):''}
+          ${rw('Max Weight',ni(c.key,'maxWeight',r.maxWeight,'lbs'),r.volThreshold===undefined)}
+          ${r.maxLongestInch!==undefined?rw('Max Longest Side',ni(c.key,'maxLongestInch',r.maxLongestInch,'inches'),true):''}
+          ${r.maxCubicIn!==undefined?rw('Max Volume',ni(c.key,'maxCubicIn',r.maxCubicIn,'cu.in'),false):''}
+          ${r.oversize?`
+            ${rw('Oversize L1',ni(c.key,'oversize.L1.t',r.oversize.L1.t,'cm →')+' +$'+ni(c.key,'oversize.L1.c',r.oversize.L1.c,''),true)}
+            ${rw('Oversize L2',ni(c.key,'oversize.L2.t',r.oversize.L2.t,'cm →')+' +$'+ni(c.key,'oversize.L2.c',r.oversize.L2.c,''),false)}
+            ${rw('Oversize L3',ni(c.key,'oversize.L3.t',r.oversize.L3.t,'cm →')+' +$'+ni(c.key,'oversize.L3.c',r.oversize.L3.c,''),true)}
+          `:''}
+          ${r.overlength?`
+            ${rw('Overlength (lower–upper)',ni(c.key,'overlength.t',r.overlength.t,'cm')+'–'+ni(c.key,'overlength.limit',r.overlength.limit,'cm →')+' +$'+ni(c.key,'overlength.c',r.overlength.c,''),false)}
+            ${rw('Overlength >upper charge','+$'+ni(c.key,'overlength.lc',r.overlength.lc,''),true)}
+          `:''}
+          ${r.overvolume?rw('Overvolume','>'+ni(c.key,'overvolume.t',r.overvolume.t,'cu.in →')+' +$'+ni(c.key,'overvolume.c',r.overvolume.c,''),false):''}
+          ${r.rsc?rw('Residential Surcharge','+$'+ni(c.key,'rsc.c',r.rsc.c,'if gross < 10 kg'),true):''}
+          ${r.overweight?rw('Overweight Threshold','>'+ni(c.key,'overweight.t',r.overweight.t,'lbs — region-based charge'),false):''}
+          ${r.fuelSurcharge!==undefined?rw('Fuel Surcharge',ni(c.key,'fuelSurcharge',r.fuelSurcharge,'(decimal — 0.1803 = 18.03%)'),true):''}
+          ${rw('Marketplaces',admin?`<input class="inp" type="text" style="width:100%;padding:4px 7px;font-size:12px" value="${(r.marketplaces||[]).join(', ')}" onchange="setMarketplaces('${c.key}',this.value)" placeholder="Comma-separated"/>`:`<span style="font-size:12px">${(r.marketplaces||[]).join(', ')}</span>`,false)}
+          ${rw('PO Box',admin?`<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px"><input type="checkbox" ${r.poAddress?'checked':''} onchange="setPoAddress('${c.key}',this.checked)"/> ${r.poAddress?'Accepted':'Not accepted'}</label>`:`<span class="mono" style="font-size:12px">${r.poAddress?'Yes':'No'}</span>`,true)}
+        </tbody>
       </table>
-    </div>`).join('')}
+    </div>`}).join('')}
     <div class="card" style="background:var(--orange-bg);border-color:#fcd34d">
       <div style="font-size:13px;color:var(--orange);font-weight:500">UPS Region-Based Surcharges</div>
       <div style="font-size:12px;color:var(--text2);margin-top:6px">Overweight, Overdimension, Large Package, DAS, and Packaging surcharges are ZIP-driven. Upload a <strong>REGION_RATE_LOOKUP</strong> file in Zone Mapping to enable dynamic calculation.</div>
@@ -763,8 +835,16 @@ function handleShipDrop(e){e.preventDefault();$('#ship-drop').classList.remove('
 
 async function handleShipFile(e){
   const f=e.target.files[0];if(!f)return;
-  try{const buf=await f.arrayBuffer();const rows=parseXlsx(new Uint8Array(buf),'shipment');state.shipments=rows.map(r=>mapRow(r)).filter(r=>r.grossKg>0);state.results=[];renderCalculator();show(`${state.shipments.length} shipments loaded from ${f.name}`);}
-  catch(err){show('Failed to parse: '+err.message,'error');}
+  try{
+    const buf=await f.arrayBuffer();
+    const rows=parseXlsx(new Uint8Array(buf),'shipment');
+    const all=rows.map(r=>mapRow(r));
+    const valid=all.filter(r=>r.grossKg>0);
+    state.shipments=valid;state.results=[];state.calcPage=0;
+    renderCalculator();
+    const skipped=all.length-valid.length;
+    show(`${valid.length} shipments loaded from ${f.name}${skipped?' — '+skipped+' rows skipped (missing/zero weight)':''}`);
+  }catch(err){show('Failed to parse: '+err.message,'error');}
 }
 
 async function handleRateFile(e){
@@ -793,7 +873,7 @@ function runCalcUI(){
     if(!state.shipments.length){show('Upload a shipment file first.','error');return;}
     src=state.shipments;
   }
-  state.results=runCalc(src);renderCalculator();
+  state.results=runCalc(src);state.calcPage=0;renderCalculator();
 }
 
 // ═══════════════════════════════════════════════════
