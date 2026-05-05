@@ -235,7 +235,8 @@ let state = {
   dasMap:{},
   zoneSurchargeMap:JSON.parse(JSON.stringify(DEFAULT_ZONE_SURCHARGES)),
   surchargeThresholds:JSON.parse(JSON.stringify(DEFAULT_THRESHOLDS)),
-  rateCards:[],        // [{key,zone,weight,unit,rate,startDate,endDate}]
+  rateCards:[],        // [{key,zone,weight,unit,rate,startDate,endDate,serviceKey}]
+  serviceKeys:[],      // [{key,label,type,baseCarrier,color}]
 };
 
 // ═══════════════════════════════════════════════════
@@ -246,7 +247,7 @@ function saveUsers(u){localStorage.setItem('lm_users',JSON.stringify(u));}
 function isAdmin(){return state.currentUser?.role==='admin';}
 
 function initSession(){
-  loadSavedRules();loadSavedSurchargeData();loadSavedCarriers();loadSavedRateCards();
+  loadSavedRules();loadSavedSurchargeData();loadSavedCarriers();loadSavedRateCards();loadSavedServiceKeys();
   const saved=JSON.parse(localStorage.getItem('lm_session')||'null');
   if(saved){state.currentUser=saved;applyRole();return;}
   const users=loadUsers();
@@ -421,6 +422,34 @@ function removeCustomCarrier(key){
   show(`Carrier "${key}" removed`,'success');
 }
 
+// ─── SERVICE KEY MANAGEMENT ───
+function saveServiceKeys(){localStorage.setItem('lm_service_keys',JSON.stringify(state.serviceKeys));}
+function loadSavedServiceKeys(){const saved=JSON.parse(localStorage.getItem('lm_service_keys')||'[]');state.serviceKeys=saved;saved.forEach(sk=>injectCarrierStyle(sk.key,sk.color||'#6b7280'));}
+function getServiceKeyInfo(key){return state.serviceKeys.find(s=>s.key===key)||null;}
+function addServiceKey(key,label,type,baseCarrier,color){
+  key=(key||'').toUpperCase().replace(/[^A-Z0-9_\-]/g,'');label=(label||'').trim();
+  if(!key){show('Service key is required','error');return;}
+  if(!label){show('Display name is required','error');return;}
+  if(state.serviceKeys.find(s=>s.key===key)){show('Service key "'+key+'" already exists','error');return;}
+  const nsk={key,label,type:type||'UPS',baseCarrier:baseCarrier||'UPS',color:color||'#6b7280'};
+  state.serviceKeys.push(nsk);
+  if(!state.rules[key])state.rules[key]=JSON.parse(JSON.stringify(state.rules[baseCarrier]||makeDefaultRules(type||'UPS')));
+  saveServiceKeys();saveRules();
+  injectCarrierStyle(key,color||'#6b7280');
+  renderRules();
+  show(`Service key "${label}" added`,'success');
+}
+function removeServiceKey(key){
+  const sk=state.serviceKeys.find(x=>x.key===key);
+  if(!sk){show('Service key not found','error');return;}
+  if(!confirm(`Remove service key "${sk.label}" (${key})? This cannot be undone.`))return;
+  state.serviceKeys=state.serviceKeys.filter(x=>x.key!==key);
+  delete state.rules[key];delete state.dasMap[key];delete state.zoneSurchargeMap[key];delete state.surchargeThresholds[key];
+  saveServiceKeys();saveRules();saveSurchargeData();
+  renderRules();
+  show(`Service key "${key}" removed`,'success');
+}
+
 function setRule(carrier,path,val){
   let obj=state.rules[carrier];
   const parts=path.split('.');
@@ -447,17 +476,18 @@ function getRateWithDate(svc,zone,wt,unit,dateStr,partnerFilter){
 }
 function isMpSvc(rules,carrier,mp){const svc=rules[carrier];if(!svc)return false;const m=(mp||'').toLowerCase();const mps=svc.marketplaces.map(x=>x.toLowerCase());if(mps.includes(m))return true;if(m==='etsy_usa'&&mps.includes('etsy'))return true;if(carrier==='UNIUNI'&&m==='amazon fba'&&mps.includes('amazon'))return true;if(mps.includes('other'))return true;return false;}
 function calcCost(box,carrier,partnerFilter){
-  const svc=state.rules[carrier];if(!svc)return{ok:false,reason:'Unknown carrier',carrier,partner:partnerFilter||'',comboId:carrier+'||'+(partnerFilter||'')};
+  const skInfo=getServiceKeyInfo(carrier);
+  const svc=state.rules[carrier]||(skInfo&&state.rules[skInfo.baseCarrier])||null;if(!svc)return{ok:false,reason:'Unknown carrier',carrier,partner:partnerFilter||'',comboId:carrier+'||'+(partnerFilter||'')};
   const{grossKg,L_cm,W_cm,H_cm,postal,marketplace,isPO,dwsDate}=box;
   const gLbs=grossKg*2.20462;const Li=L_cm/2.54,Wi=W_cm/2.54,Hi=H_cm/2.54;
   const vCin=Li*Wi*Hi;const sides=[L_cm,W_cm,H_cm].sort((a,b)=>b-a);
   const lgCm=sides[0]+2*(sides[1]+sides[2]);
   if(!isMpSvc(state.rules,carrier,marketplace))return{ok:false,reason:'MP not serviceable',carrier,partner:partnerFilter||'',comboId:carrier+'||'+(partnerFilter||'')};
   if(isPO&&!svc.poAddress)return{ok:false,reason:'PO Box not serviceable',carrier,partner:partnerFilter||'',comboId:carrier+'||'+(partnerFilter||'')};
-  const ctype=CARRIERS.find(c=>c.key===carrier)?.type||'USPS';
+  const ctype=CARRIERS.find(c=>c.key===carrier)?.type||(skInfo?.type)||'USPS';
   let zone;
   const cid=carrier+'||'+(partnerFilter||'');
-  if(ctype==='UNIUNI'){const zk=String(postal).padStart(5,'0');zone=state.zoneMap[carrier.toLowerCase()]?.[zk]??state.zoneMap.uniuni[zk]??null;if(!zone)return{ok:false,reason:'ZIP not in zone coverage',carrier,partner:partnerFilter||'',comboId:cid};}
+  if(ctype==='UNIUNI'){const zk=String(postal).padStart(5,'0');zone=state.zoneMap[carrier.toLowerCase()]?.[zk]??state.zoneMap[skInfo?.baseCarrier?.toLowerCase()]?.[zk]??state.zoneMap.uniuni[zk]??null;if(!zone)return{ok:false,reason:'ZIP not in zone coverage',carrier,partner:partnerFilter||'',comboId:cid};}
   else zone=uspsZone(postal);
   if(ctype==='UNIUNI'){if(gLbs>svc.maxWeight)return{ok:false,reason:'Exceeds '+svc.maxWeight+'lb limit',carrier,partner:partnerFilter||'',comboId:cid};if(svc.maxLongestInch&&sides[0]/2.54>svc.maxLongestInch)return{ok:false,reason:'Longest side > '+svc.maxLongestInch+'in',carrier,partner:partnerFilter||'',comboId:cid};if(svc.maxCubicIn&&vCin>svc.maxCubicIn)return{ok:false,reason:'Volume > '+svc.maxCubicIn+' cu.in',carrier,partner:partnerFilter||'',comboId:cid};}
   const volLbs=(ctype==='UNIUNI'||vCin>svc.volThreshold)?vCin/svc.volFactor:0;
@@ -469,9 +499,9 @@ function calcCost(box,carrier,partnerFilter){
   const sur=[];
   if(ctype==='USPS'){const os=svc.oversize;if(os){if(sides[0]>os.L1.t)sur.push({n:'Oversize L1',a:os.L1.c});if(sides[1]>os.L2.t)sur.push({n:'Oversize L2',a:os.L2.c});if(sides[2]>os.L3.t)sur.push({n:'Oversize L3',a:os.L3.c});}const ol=svc.overlength;if(ol){if(sides[0]>ol.t&&sides[0]<=ol.limit)sur.push({n:'Overlength',a:ol.c});if(sides[0]>ol.limit)sur.push({n:'OverlengthLimit',a:ol.lc});}if(svc.overvolume&&vCin>svc.overvolume.t)sur.push({n:'Overvolume',a:svc.overvolume.c});}
   if(ctype==='UPS'){
-    const thr=state.surchargeThresholds[carrier]||state.surchargeThresholds.UPS||DEFAULT_THRESHOLDS.UPS;
-    const zs=state.zoneSurchargeMap[carrier]||state.zoneSurchargeMap.UPS||{};
-    const dm=state.dasMap[carrier]||{};
+    const thr=state.surchargeThresholds[carrier]||state.surchargeThresholds[skInfo?.baseCarrier]||state.surchargeThresholds.UPS||DEFAULT_THRESHOLDS.UPS;
+    const zs=state.zoneSurchargeMap[carrier]||state.zoneSurchargeMap[skInfo?.baseCarrier]||state.zoneSurchargeMap.UPS||{};
+    const dm=state.dasMap[carrier]||state.dasMap[skInfo?.baseCarrier]||{};
     const zStr=String(zone);const zip5=String(postal).padStart(5,'0');
     // DAS/EDAS — ZIP-based lookup
     const dasTypes=['DAS Residential','DAS Commercial','EDAS Residential','EDAS Commercial','Remote Area'];
@@ -585,17 +615,17 @@ function downloadTemplate(type){
       ['TRK100004','BOX-004','2.50','45','30','20','77001','eBay','no','2026-01-16'],
     ]},
     rates:{name:'Rate_Card_Template.csv',rows:[
-      ['country','partner','carrier','service','Zone','LBS','Unit','Rate','Start date','End date'],
-      ['US','Shipbae','USPS','Ground Advantage','1','1','lbs','5.57','01-01-2026','31-12-2026'],
-      ['US','Shipbae','USPS','Ground Advantage','1','2','lbs','5.81','01-01-2026','31-12-2026'],
-      ['US','Shipbae','USPS','Ground Advantage','1','1','oz','3.74','01-01-2026','31-12-2026'],
-      ['US','Shipbae','USPS','Ground Advantage','2','1','lbs','5.63','01-01-2026','31-12-2026'],
-      ['US','Shipbae','USPS','Priority Mail','1','1','lbs','6.55','01-01-2026','31-12-2026'],
-      ['US','Shipbae','USPS','Priority Mail','2','1','lbs','6.67','01-01-2026','31-12-2026'],
-      ['US','Shipbae','UniUni','Ground','1','1','lbs','2.79','01-01-2026','31-12-2026'],
-      ['US','Shipbae','UniUni','Ground','2','1','lbs','2.83','01-01-2026','31-12-2026'],
-      ['US','Shipbae','UPS','Ground','2','1','lbs','6.90','01-01-2026','31-12-2026'],
-      ['US','Shipbae','UPS','Ground','3','1','lbs','6.90','01-01-2026','31-12-2026'],
+      ['Key','country','partner','carrier','service','Zone','LBS','Unit','Rate','Start date','End date'],
+      ['','US','Shipbae','USPS','Ground Advantage','1','1','lbs','5.57','01-01-2026','31-12-2026'],
+      ['','US','Shipbae','USPS','Ground Advantage','1','2','lbs','5.81','01-01-2026','31-12-2026'],
+      ['','US','Shipbae','USPS','Ground Advantage','1','1','oz','3.74','01-01-2026','31-12-2026'],
+      ['','US','Shipbae','USPS','Ground Advantage','2','1','lbs','5.63','01-01-2026','31-12-2026'],
+      ['','US','Shipbae','USPS','Priority Mail','1','1','lbs','6.55','01-01-2026','31-12-2026'],
+      ['','US','Shipbae','UniUni','Ground','1','1','lbs','2.79','01-01-2026','31-12-2026'],
+      ['','US','Shipbae','UPS','Ground','2','1','lbs','6.90','01-01-2026','31-12-2026'],
+      ['NYSFS-FEDEX-EXPRESS-SAVER','US','NYSFS','FEDEX','Express Saver','2','1','lbs','8.90','01-01-2026','31-12-2026'],
+      ['NYSFS-FEDEX-EXPRESS-SAVER','US','NYSFS','FEDEX','Express Saver','3','1','lbs','9.50','01-01-2026','31-12-2026'],
+      ['NYSFS-FEDEX-EXPRESS-SAVER','US','NYSFS','FEDEX','Express Saver','2','2','lbs','10.20','01-01-2026','31-12-2026'],
     ]},
     rules:{name:'Rules_Reference.csv',rows:[
       ['Carrier','Rule','Value','Notes'],
@@ -740,14 +770,16 @@ const DL_ICON=`<svg width="13" height="13" viewBox="0 0 24 24" fill="none" strok
 function getAvailCombos(){
   const seen=new Set();const out=[];
   CARRIERS.forEach(c=>{const id=c.key+'||';if(!seen.has(id)){seen.add(id);out.push({key:c.key,partner:''});}});
-  state.rateCards.forEach(r=>{if(r.partner){const id=r.key+'||'+r.partner;if(!seen.has(id)){seen.add(id);out.push({key:r.key,partner:r.partner});}}});
+  state.serviceKeys.forEach(sk=>{const id=sk.key+'||';if(!seen.has(id)){seen.add(id);out.push({key:sk.key,partner:''});}});
+  state.rateCards.forEach(r=>{if(r.serviceKey){const id=r.serviceKey+'||';if(!seen.has(id)){seen.add(id);out.push({key:r.serviceKey,partner:''});}}else if(r.partner){const id=r.key+'||'+r.partner;if(!seen.has(id)){seen.add(id);out.push({key:r.key,partner:r.partner});}}});
   return out;
 }
 function mkComboId(c){return c.key+'||'+c.partner;}
 function mkComboLabel(c,short){
   const cl=CARRIERS.find(x=>x.key===c.key);
-  const base=(cl?.label||c.key).replace('USPS ','USPS ').replace(' Ground Advantage','GA').replace(' Priority Mail','PM').replace(' Ground','');
-  return c.partner?(c.partner+' · '+base):(short?base:(cl?.label||c.key));
+  const sk=getServiceKeyInfo(c.key);
+  const base=cl?(cl.label||c.key).replace('USPS ','USPS ').replace(' Ground Advantage','GA').replace(' Priority Mail','PM').replace(' Ground',''):(sk?.label||c.key);
+  return c.partner?(c.partner+' · '+base):(short?base:(cl?.label||sk?.label||c.key));
 }
 function getSelectedCombos(){
   const avail=getAvailCombos();
@@ -1124,9 +1156,64 @@ function renderRules(){
       </div>
     </div>
     `:''}
+
+    ${state.serviceKeys.length>0?`
+    <div style="font-size:13px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin:8px 0 12px">Service Keys</div>
+    ${state.serviceKeys.map(sk=>{const r=state.rules[sk.key]||state.rules[sk.baseCarrier]||{};return`
+    <div class="card">
+      <div class="rules-carrier-header" style="margin-bottom:12px">
+        <div class="carrier-dot" style="background:${sk.color}"></div>
+        <span style="font-weight:600;font-size:15px">${sk.label}</span>
+        <span style="font-size:11px;color:var(--text2);margin-left:6px;font-family:monospace">${sk.key}</span>
+        <span class="badge" style="margin-left:8px;background:${sk.color}20;color:${sk.color};border:1px solid ${sk.color}40;font-size:10px">${sk.type}-type · base: ${sk.baseCarrier}</span>
+        ${admin?`<button class="btn btn-sm btn-danger" style="margin-left:auto;font-size:11px" onclick="removeServiceKey('${sk.key}')">Remove</button>`:''}
+      </div>
+      <table style="width:100%;border-collapse:collapse">
+        <colgroup><col style="width:40%"/><col/></colgroup>
+        <tbody>
+          ${rw('Vol Factor',ni(sk.key,'volFactor',r.volFactor??166,'cu.in per lb'),false)}
+          ${r.volThreshold!==undefined?rw('Vol Threshold',ni(sk.key,'volThreshold',r.volThreshold,'cu.in'),true):''}
+          ${rw('Max Weight',ni(sk.key,'maxWeight',r.maxWeight??150,'lbs'),r.volThreshold===undefined)}
+          ${rw('Marketplaces',admin?`<input class="inp" type="text" style="width:100%;padding:4px 7px;font-size:12px" value="${(r.marketplaces||[]).join(', ')}" onchange="setMarketplaces('${sk.key}',this.value)" placeholder="Comma-separated"/>`:`<span style="font-size:12px">${(r.marketplaces||[]).join(', ')||'—'}</span>`,true)}
+          ${rw('PO Box',admin?`<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px"><input type="checkbox" ${r.poAddress?'checked':''} onchange="setPoAddress('${sk.key}',this.checked)"/> ${r.poAddress?'Accepted':'Not accepted'}</label>`:`<span class="mono" style="font-size:12px">${r.poAddress?'Yes':'No'}</span>`,false)}
+        </tbody>
+      </table>
+    </div>`}).join('')}`:''}
+
+    ${admin?`
+    <div class="card" style="margin-bottom:16px;border-style:dashed;border-color:var(--teal)">
+      <div style="font-size:14px;font-weight:600;margin-bottom:6px">Add Service Key</div>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:12px">A service key (e.g. <span class="mono">NYSFS-FEDEX-EXPRESS-SAVER</span>) links rate cards, rules, DAS, and zone surcharges for a specific partner + carrier + service combination.</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 100px 1fr 1fr auto;gap:12px;align-items:flex-end;flex-wrap:wrap">
+        <div class="form-group" style="margin:0"><label class="lbl">Service Key</label>
+          <input class="inp" id="nsk-key" placeholder="NYSFS-FEDEX-EXPRESS-SAVER" style="text-transform:uppercase;font-family:monospace;font-size:12px" oninput="this.value=this.value.toUpperCase().replace(/[^A-Z0-9_\\-]/g,'')"/>
+        </div>
+        <div class="form-group" style="margin:0"><label class="lbl">Display Name</label>
+          <input class="inp" id="nsk-label" placeholder="e.g. NYSFS FedEx Express Saver"/>
+        </div>
+        <div class="form-group" style="margin:0"><label class="lbl">Color</label>
+          <input class="inp" id="nsk-color" type="color" value="#0277bd" style="height:36px;padding:2px 4px;cursor:pointer"/>
+        </div>
+        <div class="form-group" style="margin:0"><label class="lbl">Carrier Type</label>
+          <select class="inp" id="nsk-type">
+            <option value="UPS" selected>UPS-type (zone surcharges + fuel %)</option>
+            <option value="USPS">USPS-type (oversize / overlength rules)</option>
+            <option value="UNIUNI">UniUni-type (ZIP coverage required)</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin:0"><label class="lbl">Base Carrier (inherit rules)</label>
+          <select class="inp" id="nsk-base">
+            ${CARRIERS.map(c=>`<option value="${c.key}">${c.label}</option>`).join('')}
+          </select>
+        </div>
+        <button class="btn btn-primary" style="background:var(--teal)" onclick="addServiceKey(document.getElementById('nsk-key').value,document.getElementById('nsk-label').value,document.getElementById('nsk-type').value,document.getElementById('nsk-base').value,document.getElementById('nsk-color').value)">Add Key</button>
+      </div>
+    </div>
+    `:''}
+
     <div class="card" style="background:var(--orange-bg);border-color:#fcd34d">
       <div style="font-size:13px;color:var(--orange);font-weight:500">UPS-Type Region-Based Surcharges</div>
-      <div style="font-size:12px;color:var(--text2);margin-top:6px">For UPS-type carriers: Overweight, Overdimension, Large Package, DAS, and Packaging surcharges are configured in the <strong>DAS &amp; Regional Surcharges</strong> tab.</div>
+      <div style="font-size:12px;color:var(--text2);margin-top:6px">For UPS-type carriers and service keys: Overweight, Overdimension, Large Package, DAS, and Packaging surcharges are configured in the <strong>DAS &amp; Regional Surcharges</strong> tab. Upload your REGION_RATE_LOOKUP file using the service key as the carrier column (e.g. <span class="mono">NYSFS-FEDEX-EXPRESS-SAVER</span>).</div>
     </div>
   `;
 }
@@ -1366,6 +1453,7 @@ function renderSurcharges(){
     {key:'UPS',label:'UPS Ground',color:'#e65100'},
     {key:'FEDEX',label:'FedEx Ground',color:'#4d148c'},
     ...CARRIERS.filter(c=>c.type==='UPS'&&c.custom).map(c=>({key:c.key,label:c.label,color:c.color})),
+    ...state.serviceKeys.filter(sk=>sk.type==='UPS').map(sk=>({key:sk.key,label:sk.label,color:sk.color})),
   ];
   const ZONE_LABELS={
     OWSURCHARGE:'Overweight (>threshold)',
@@ -1423,6 +1511,7 @@ function renderSurcharges(){
             <option value="UPS">UPS Ground</option>
             <option value="FEDEX">FedEx Ground</option>
             ${CARRIERS.filter(c=>c.type==='UPS'&&c.custom).map(c=>`<option value="${c.key}">${c.label}</option>`).join('')}
+            ${state.serviceKeys.filter(sk=>sk.type==='UPS').map(sk=>`<option value="${sk.key}">${sk.label}</option>`).join('')}
           </select>
         </div>
         <div class="form-group" style="margin:0"><label class="lbl">Surcharge Type</label>
@@ -1571,7 +1660,9 @@ async function handleShipFile(e){
 async function handleRateFile(e){
   const f=e.target.files[0];if(!f)return;
   try{const buf=await f.arrayBuffer();const rows=parseXlsx(new Uint8Array(buf));let nBase=0,nDated=0;
+    const SK_COLORS=['#e65100','#4d148c','#0277bd','#2e7d32','#6a1b9a','#00695c','#bf360c','#1565c0'];
     rows.forEach(r=>{
+      const rawKey=String(r.Key||r.key||'').trim().toUpperCase().replace(/[^A-Z0-9_\-]/g,'');
       const s=String(r.Service||r.service||r.service_name||'');
       const carr=String(r.Carrier||r.carrier||'');
       const z=String(r.Zone||r.zone||'');
@@ -1580,8 +1671,27 @@ async function handleRateFile(e){
       const rate=parseFloat(r.Rate||r.rate||0);
       const sd=parseISODate(r['Start date']||r['Start Date']||r.start_date||r.StartDate||null);
       const ed=parseISODate(r['End date']||r['End Date']||r.end_date||r.EndDate||null);
-      const sLow=(s+' '+carr).toLowerCase();
+      const partner=String(r.Partner||r.partner||r['Partner/Aggregator']||r.partner_name||r.Aggregator||r.aggregator||'');
+      const country=String(r.Country||r.country||'US');
       let sk=null;
+      if(rawKey){
+        sk=rawKey;
+        // Auto-register as service key if not already a known carrier or service key
+        if(!CARRIERS.find(c=>c.key===sk)&&!state.serviceKeys.find(x=>x.key===sk)){
+          const baseC=carr.toUpperCase()||'UPS';
+          const color=SK_COLORS[state.serviceKeys.length%SK_COLORS.length];
+          const lbl=partner?partner+' '+carr+' '+s:(carr+' '+s).trim()||sk;
+          const nsk={key:sk,label:lbl,type:'UPS',baseCarrier:baseC,color};
+          state.serviceKeys.push(nsk);
+          if(!state.rules[sk])state.rules[sk]=JSON.parse(JSON.stringify(state.rules[baseC]||makeDefaultRules('UPS')));
+          injectCarrierStyle(sk,color);
+        }
+        if(!z||!w||!rate)return;
+        state.rateCards.push({key:sk,zone:z,weight:w,unit:u.includes('oz')?'OZ':'LBS',rate,startDate:sd||'',endDate:ed||'',partner,country,serviceKey:sk});
+        nDated++;
+        return;
+      }
+      const sLow=(s+' '+carr).toLowerCase();
       if(sLow.includes('ground advantage'))sk='USPS_GA';
       else if(sLow.includes('priority mail')||sLow.includes('priority'))sk='USPS_PM';
       else if(sLow.includes('uniuni')||carr.toLowerCase().includes('uniuni'))sk='UNIUNI';
@@ -1589,9 +1699,7 @@ async function handleRateFile(e){
       else{const found=CARRIERS.find(c=>c.label.toLowerCase()===s.toLowerCase()||c.key===s.toUpperCase()||c.label.toLowerCase()===carr.toLowerCase());if(found)sk=found.key;}
       if(!sk||!z||!w||!rate)return;
       if(sd||ed){
-        const partner=String(r.Partner||r.partner||r['Partner/Aggregator']||r.partner_name||r.Aggregator||r.aggregator||'');
-        const country=String(r.Country||r.country||'US');
-        state.rateCards.push({key:sk,zone:z,weight:w,unit:u.includes('oz')?'OZ':'LBS',rate,startDate:sd||'',endDate:ed||'',partner,country});
+        state.rateCards.push({key:sk,zone:z,weight:w,unit:u.includes('oz')?'OZ':'LBS',rate,startDate:sd||'',endDate:ed||'',partner,country,serviceKey:null});
         nDated++;
       }else{
         if(!state.rateData[sk])state.rateData[sk]={oz:{},lbs:{}};
@@ -1600,7 +1708,7 @@ async function handleRateFile(e){
         state.rateData[sk][tbl][z][w]=rate;nBase++;
       }
     });
-    saveRateCards();
+    saveRateCards();saveServiceKeys();saveRules();
     show(`Loaded: ${nDated} dated + ${nBase} base rate entries from ${f.name}`);renderRates();}
   catch(err){show('Failed to parse: '+err.message,'error');}
 }
