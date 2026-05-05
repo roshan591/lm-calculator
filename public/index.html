@@ -436,34 +436,36 @@ function resetCarrierRules(carrier){const c=CARRIERS.find(x=>x.key===carrier);st
 
 function uspsZone(z){const p=parseInt(String(z).padStart(5,'0').slice(0,3));if(p<=119||(p>=180&&p<=191))return 2;if((p>=120&&p<=149)||(p>=192&&p<=269))return 3;if((p>=150&&p<=179)||(p>=270&&p<=289)||(p>=430&&p<=499)||(p>=530&&p<=549))return 4;if((p>=290&&p<=349)||(p>=400&&p<=429)||(p>=500&&p<=529)||(p>=550&&p<=599)||(p>=600&&p<=629)||(p>=460&&p<=479))return 5;if((p>=350&&p<=399)||(p>=630&&p<=693)||(p>=700&&p<=729))return 6;if((p>=730&&p<=799)||(p>=570&&p<=589)||(p>=800&&p<=816)||(p>=820&&p<=839)||(p>=870&&p<=888))return 7;return 8;}
 function getRate(rd,svc,zone,wt,unit){const t=rd[svc];if(!t)return null;const z=String(zone);if(unit==='OZ'){const oz=t.oz?.[z];if(oz)return oz[String(Math.min(Math.ceil(wt),16))]??null;}const lb=t.lbs?.[z];if(!lb)return null;const keys=Object.keys(lb).map(Number).sort((a,b)=>a-b);const k=keys.filter(k=>k<=Math.ceil(wt));return k.length?lb[String(k[k.length-1])]:null;}
-function getRateWithDate(svc,zone,wt,unit,dateStr){
+function getRateWithDate(svc,zone,wt,unit,dateStr,partnerFilter){
   if(state.rateCards.length>0){
     const z=String(zone);const ceiling=unit==='OZ'?Math.min(Math.ceil(wt),16):Math.ceil(wt);
-    const matching=state.rateCards.filter(r=>r.key===svc&&String(r.zone)===z&&r.unit===unit&&(!r.startDate||!dateStr||r.startDate<=dateStr)&&(!r.endDate||!dateStr||r.endDate>=dateStr));
+    const matching=state.rateCards.filter(r=>r.key===svc&&String(r.zone)===z&&r.unit===unit&&(!r.startDate||!dateStr||r.startDate<=dateStr)&&(!r.endDate||!dateStr||r.endDate>=dateStr)&&(!partnerFilter||r.partner===partnerFilter));
     if(matching.length>0){const tiers=matching.map(r=>({...r,wn:Number(r.weight)})).filter(r=>r.wn<=ceiling).sort((a,b)=>b.wn-a.wn);if(tiers.length>0)return tiers[0].rate;}
   }
+  if(partnerFilter)return null;
   return getRate(state.rateData,svc,zone,wt,unit);
 }
 function isMpSvc(rules,carrier,mp){const svc=rules[carrier];if(!svc)return false;const m=(mp||'').toLowerCase();const mps=svc.marketplaces.map(x=>x.toLowerCase());if(mps.includes(m))return true;if(m==='etsy_usa'&&mps.includes('etsy'))return true;if(carrier==='UNIUNI'&&m==='amazon fba'&&mps.includes('amazon'))return true;if(mps.includes('other'))return true;return false;}
-function calcCost(box,carrier){
-  const svc=state.rules[carrier];if(!svc)return{ok:false,reason:'Unknown carrier'};
+function calcCost(box,carrier,partnerFilter){
+  const svc=state.rules[carrier];if(!svc)return{ok:false,reason:'Unknown carrier',carrier,partner:partnerFilter||'',comboId:carrier+'||'+(partnerFilter||'')};
   const{grossKg,L_cm,W_cm,H_cm,postal,marketplace,isPO,dwsDate}=box;
   const gLbs=grossKg*2.20462;const Li=L_cm/2.54,Wi=W_cm/2.54,Hi=H_cm/2.54;
   const vCin=Li*Wi*Hi;const sides=[L_cm,W_cm,H_cm].sort((a,b)=>b-a);
   const lgCm=sides[0]+2*(sides[1]+sides[2]);
-  if(!isMpSvc(state.rules,carrier,marketplace))return{ok:false,reason:'MP not serviceable'};
-  if(isPO&&!svc.poAddress)return{ok:false,reason:'PO Box not serviceable'};
+  if(!isMpSvc(state.rules,carrier,marketplace))return{ok:false,reason:'MP not serviceable',carrier,partner:partnerFilter||'',comboId:carrier+'||'+(partnerFilter||'')};
+  if(isPO&&!svc.poAddress)return{ok:false,reason:'PO Box not serviceable',carrier,partner:partnerFilter||'',comboId:carrier+'||'+(partnerFilter||'')};
   const ctype=CARRIERS.find(c=>c.key===carrier)?.type||'USPS';
   let zone;
-  if(ctype==='UNIUNI'){const zk=String(postal).padStart(5,'0');zone=state.zoneMap[carrier.toLowerCase()]?.[zk]??state.zoneMap.uniuni[zk]??null;if(!zone)return{ok:false,reason:'ZIP not in zone coverage'};}
+  const cid=carrier+'||'+(partnerFilter||'');
+  if(ctype==='UNIUNI'){const zk=String(postal).padStart(5,'0');zone=state.zoneMap[carrier.toLowerCase()]?.[zk]??state.zoneMap.uniuni[zk]??null;if(!zone)return{ok:false,reason:'ZIP not in zone coverage',carrier,partner:partnerFilter||'',comboId:cid};}
   else zone=uspsZone(postal);
-  if(ctype==='UNIUNI'){if(gLbs>svc.maxWeight)return{ok:false,reason:'Exceeds '+svc.maxWeight+'lb limit'};if(svc.maxLongestInch&&sides[0]/2.54>svc.maxLongestInch)return{ok:false,reason:'Longest side > '+svc.maxLongestInch+'in'};if(svc.maxCubicIn&&vCin>svc.maxCubicIn)return{ok:false,reason:'Volume > '+svc.maxCubicIn+' cu.in'};}
+  if(ctype==='UNIUNI'){if(gLbs>svc.maxWeight)return{ok:false,reason:'Exceeds '+svc.maxWeight+'lb limit',carrier,partner:partnerFilter||'',comboId:cid};if(svc.maxLongestInch&&sides[0]/2.54>svc.maxLongestInch)return{ok:false,reason:'Longest side > '+svc.maxLongestInch+'in',carrier,partner:partnerFilter||'',comboId:cid};if(svc.maxCubicIn&&vCin>svc.maxCubicIn)return{ok:false,reason:'Volume > '+svc.maxCubicIn+' cu.in',carrier,partner:partnerFilter||'',comboId:cid};}
   const volLbs=(ctype==='UNIUNI'||vCin>svc.volThreshold)?vCin/svc.volFactor:0;
   const chgLbs=Math.max(gLbs,volLbs);
-  if(chgLbs>(svc.maxWeight||150))return{ok:false,reason:`Weight ${chgLbs.toFixed(1)}lbs > max`};
+  if(chgLbs>(svc.maxWeight||150))return{ok:false,reason:'Weight '+chgLbs.toFixed(1)+'lbs > max',carrier,partner:partnerFilter||'',comboId:cid};
   const isOz=(ctype!=='UPS')&&chgLbs<1.0;
-  const base=getRateWithDate(carrier,zone,isOz?chgLbs*16:chgLbs,isOz?'OZ':'LBS',dwsDate||null);
-  if(base==null)return{ok:false,reason:`No rate: ${chgLbs.toFixed(2)}lbs z${zone}`};
+  const base=getRateWithDate(carrier,zone,isOz?chgLbs*16:chgLbs,isOz?'OZ':'LBS',dwsDate||null,partnerFilter||'');
+  if(base==null)return{ok:false,reason:'No rate: '+chgLbs.toFixed(2)+'lbs z'+zone,carrier,partner:partnerFilter||'',comboId:cid};
   const sur=[];
   if(ctype==='USPS'){const os=svc.oversize;if(os){if(sides[0]>os.L1.t)sur.push({n:'Oversize L1',a:os.L1.c});if(sides[1]>os.L2.t)sur.push({n:'Oversize L2',a:os.L2.c});if(sides[2]>os.L3.t)sur.push({n:'Oversize L3',a:os.L3.c});}const ol=svc.overlength;if(ol){if(sides[0]>ol.t&&sides[0]<=ol.limit)sur.push({n:'Overlength',a:ol.c});if(sides[0]>ol.limit)sur.push({n:'OverlengthLimit',a:ol.lc});}if(svc.overvolume&&vCin>svc.overvolume.t)sur.push({n:'Overvolume',a:svc.overvolume.c});}
   if(ctype==='UPS'){
@@ -488,9 +490,17 @@ function calcCost(box,carrier){
     sur.push({n:`Fuel (${((thr.fuelSurcharge||svc.fuelSurcharge)*100).toFixed(2)}%)`,a:+(sub*(thr.fuelSurcharge||svc.fuelSurcharge)).toFixed(2)});
   }
   const surT=sur.reduce((s,x)=>s+(x.a||0),0);
-  return{ok:true,carrier,zone,chgLbs:+chgLbs.toFixed(4),volLbs:+volLbs.toFixed(4),unit:isOz?'OZ':'LBS',base,sur,surT:+surT.toFixed(2),total:+(base+surT).toFixed(2)};
+  return{ok:true,carrier,partner:partnerFilter||'',comboId:cid,zone,chgLbs:+chgLbs.toFixed(4),volLbs:+volLbs.toFixed(4),unit:isOz?'OZ':'LBS',base,sur,surT:+surT.toFixed(2),total:+(base+surT).toFixed(2)};
 }
-function runCalc(src){return src.map(box=>{const costs=CARRIERS.map(c=>calcCost(box,c.key));const el=costs.filter(c=>c.ok);const cheapest=el.length?el.reduce((a,b)=>a.total<b.total?a:b):null;return{box,costs,cheapest};});}
+function runCalc(src,combos){
+  const useCombos=combos||CARRIERS.map(c=>({key:c.key,partner:''}));
+  return src.map(box=>{
+    const costs=useCombos.map(combo=>calcCost(box,combo.key,combo.partner));
+    const el=costs.filter(c=>c.ok);
+    const cheapest=el.length?el.reduce((a,b)=>a.total<b.total?a:b):null;
+    return{box,costs,cheapest};
+  });
+}
 
 // ═══════════════════════════════════════════════════
 // EXCEL PARSING
@@ -536,50 +546,30 @@ function csvEsc(v){const s=String(v??'');return(s.includes(',')||s.includes('"')
 function csvRow(arr){return arr.map(csvEsc).join(',');}
 
 function exportCSV(){
-  const hdr=['Box ID','AWB','Postal','DWS Date','Marketplace','Allocated Carrier','Total ($)',...CARRIERS.map(c=>c.label+' ($)'),'Zone','Chg Wt (lbs)','Vol Wt (lbs)','Unit','Base Rate','Surcharge Total','Surcharges Applied'];
-  const body=state.results.map(r=>{const g=k=>r.costs.find(c=>c.carrier===k);const a=r.cheapest;return csvRow([r.box.boxId,r.box.awb,r.box.postal,r.box.dwsDate||'',r.box.marketplace,a?CARRIERS.find(c=>c.key===a.carrier)?.label:'None',a?.total??'',...CARRIERS.map(c=>{const x=g(c.key);return x?.ok?x.total:'N/A';}),a?.zone??'',a?.chgLbs??'',a?.volLbs??'',a?.unit??'',a?.base??'',a?.surT??'',a?.sur?.map(s=>`${s.n}=$${s.a}`).join('|')??'']);});
+  const usedCombos=state.results.length>0?state.results[0].costs.map(c=>({key:c.carrier,partner:c.partner||'',cid:c.comboId})):CARRIERS.map(c=>({key:c.key,partner:'',cid:c.key+'||'}));
+  const colLbl=combo=>{const cl=CARRIERS.find(c=>c.key===combo.key);return combo.partner?combo.partner+' · '+(cl?.label||combo.key):(cl?.label||combo.key);};
+  const hdr=['Box ID','AWB','Postal','DWS Date','Marketplace','Allocated Carrier','Total ($)',...usedCombos.map(co=>colLbl(co)+' ($)'),'Zone','Chg Wt (lbs)','Vol Wt (lbs)','Unit','Base Rate','Surcharge Total','Surcharges Applied'];
+  const body=state.results.map(r=>{const g=id=>r.costs.find(c=>c.comboId===id);const a=r.cheapest;const aLbl=a?(a.partner?a.partner+' · '+(CARRIERS.find(c=>c.key===a.carrier)?.label||a.carrier):(CARRIERS.find(c=>c.key===a.carrier)?.label||a.carrier)):'None';return csvRow([r.box.boxId,r.box.awb,r.box.postal,r.box.dwsDate||'',r.box.marketplace,aLbl,a?.total??'',...usedCombos.map(co=>{const x=g(co.cid);return x?.ok?x.total:'N/A';}),a?.zone??'',a?.chgLbs??'',a?.volLbs??'',a?.unit??'',a?.base??'',a?.surT??'',a?.sur?.map(s=>s.n+'=$'+s.a).join('|')??'']);});
   const csv=[csvRow(hdr),...body].join('\n');
   const a=document.createElement('a');a.href='data:text/csv,'+encodeURIComponent(csv);a.download='lm_summary_'+new Date().toISOString().slice(0,10)+'.csv';a.click();
 }
 
 function exportDetailedCSV(){
-  const cCols=label=>[
-    `${label} Eligible`,`${label} Reason`,`${label} Zone`,
-    `${label} Gross Wt (lbs)`,`${label} Vol Wt (lbs)`,`${label} Vol Factor`,
-    `${label} Unit`,`${label} Base Rate ($)`,
-    `${label} Surcharges (detail)`,`${label} Surcharge Total ($)`,`${label} Final Cost ($)`,
-  ];
-  const hdr=[
-    'Box ID','AWB','Postal','DWS Date','Marketplace','Gross Wt (kg)','L (cm)','W (cm)','H (cm)',
-    'Cheapest Carrier','Cheapest Cost ($)',
-    ...CARRIERS.flatMap(c=>cCols(c.label)),
-  ];
+  const usedCombos=state.results.length>0?state.results[0].costs.map(c=>({key:c.carrier,partner:c.partner||'',cid:c.comboId})):CARRIERS.map(c=>({key:c.key,partner:'',cid:c.key+'||'}));
+  const colLbl=combo=>{const cl=CARRIERS.find(c=>c.key===combo.key);return combo.partner?combo.partner+' · '+(cl?.label||combo.key):(cl?.label||combo.key);};
+  const cCols=label=>[label+' Eligible',label+' Reason',label+' Zone',label+' Gross Wt (lbs)',label+' Vol Wt (lbs)',label+' Vol Factor',label+' Unit',label+' Base Rate ($)',label+' Surcharges (detail)',label+' Surcharge Total ($)',label+' Final Cost ($)'];
+  const hdr=['Box ID','AWB','Postal','DWS Date','Marketplace','Gross Wt (kg)','L (cm)','W (cm)','H (cm)','Cheapest Carrier','Cheapest Cost ($)',...usedCombos.flatMap(co=>cCols(colLbl(co)))];
   const vf=Object.fromEntries(CARRIERS.map(c=>[c.key,(state.rules[c.key]||{}).volFactor||166]));
-  const cData=(costs,key)=>{
-    const c=costs.find(x=>x.carrier===key);
+  const cData=(costs,cid,key)=>{
+    const c=costs.find(x=>x.comboId===cid);
     if(!c)return Array(11).fill('');
-    const surDetail=(c.sur||[]).map(s=>`${s.n}${s.a?'=$'+s.a.toFixed(2):s.note?'('+s.note+')':''}`).join(' | ');
-    return[
-      c.ok?'Yes':'No',
-      c.ok?'':(c.reason||''),
-      c.zone??'',
-      c.ok?(c.chgLbs??''):'',
-      c.ok?(c.volLbs??''):'',
-      c.ok?vf[key]:'',
-      c.unit??'',
-      c.base??'',
-      surDetail,
-      c.surT??'',
-      c.total??'',
-    ];
+    const surDetail=(c.sur||[]).map(s=>s.n+(s.a?'=$'+s.a.toFixed(2):(s.note?'('+s.note+')':''))).join(' | ');
+    return[c.ok?'Yes':'No',c.ok?'':(c.reason||''),c.zone??'',c.ok?(c.chgLbs??''):'',c.ok?(c.volLbs??''):'',c.ok?vf[key]:'',c.unit??'',c.base??'',surDetail,c.surT??'',c.total??''];
   };
   const body=state.results.map(r=>{
     const b=r.box;const a=r.cheapest;
-    return csvRow([
-      b.boxId,b.awb,b.postal,b.dwsDate||'',b.marketplace,b.grossKg,b.L_cm,b.W_cm,b.H_cm,
-      a?CARRIERS.find(c=>c.key===a.carrier)?.label:'No carrier',a?.total??'',
-      ...CARRIERS.flatMap(c=>cData(r.costs,c.key)),
-    ]);
+    const aLbl=a?(a.partner?a.partner+' · '+(CARRIERS.find(c=>c.key===a.carrier)?.label||a.carrier):(CARRIERS.find(c=>c.key===a.carrier)?.label||a.carrier)):'No carrier';
+    return csvRow([b.boxId,b.awb,b.postal,b.dwsDate||'',b.marketplace,b.grossKg,b.L_cm,b.W_cm,b.H_cm,aLbl,a?.total??'',...usedCombos.flatMap(co=>cData(r.costs,co.cid,co.key))]);
   });
   const csv=[csvRow(hdr),...body].join('\n');
   const a=document.createElement('a');a.href='data:text/csv,'+encodeURIComponent(csv);a.download='lm_detailed_'+new Date().toISOString().slice(0,10)+'.csv';a.click();
@@ -747,13 +737,54 @@ function changeRole(email,role){
 // ═══════════════════════════════════════════════════
 const DL_ICON=`<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`;
 
+function getAvailCombos(){
+  const seen=new Set();const out=[];
+  CARRIERS.forEach(c=>{const id=c.key+'||';if(!seen.has(id)){seen.add(id);out.push({key:c.key,partner:''});}});
+  state.rateCards.forEach(r=>{if(r.partner){const id=r.key+'||'+r.partner;if(!seen.has(id)){seen.add(id);out.push({key:r.key,partner:r.partner});}}});
+  return out;
+}
+function mkComboId(c){return c.key+'||'+c.partner;}
+function mkComboLabel(c,short){
+  const cl=CARRIERS.find(x=>x.key===c.key);
+  const base=(cl?.label||c.key).replace('USPS ','USPS ').replace(' Ground Advantage','GA').replace(' Priority Mail','PM').replace(' Ground','');
+  return c.partner?(c.partner+' · '+base):(short?base:(cl?.label||c.key));
+}
+function getSelectedCombos(){
+  const avail=getAvailCombos();
+  if(!window._calcCombos)return avail;
+  return avail.filter(c=>window._calcCombos.includes(mkComboId(c)));
+}
+function toggleCalcCombo(id){
+  const avail=getAvailCombos();
+  if(!window._calcCombos)window._calcCombos=avail.map(mkComboId);
+  const idx=window._calcCombos.indexOf(id);
+  if(idx>=0){if(window._calcCombos.length>1)window._calcCombos.splice(idx,1);}
+  else window._calcCombos.push(id);
+  renderCalculator();
+}
+
 function renderCalculator(){
   const el=$('#tab-calculator');
   const r=state.results;
   const admin=isAdmin();
   const totalCost=r.filter(x=>x.cheapest).reduce((s,x)=>s+(x.cheapest.total||0),0);
-  const carriers=CARRIERS.map(c=>({...c,count:r.filter(x=>x.cheapest?.carrier===c.key).length}));
+  const selCombos=getSelectedCombos();
+  const availCombos=getAvailCombos();
   const PAGE=200;
+
+  // Pre-build combo selector card
+  const comboPills=availCombos.map(combo=>{
+    const cl=CARRIERS.find(c=>c.key===combo.key);
+    const on=selCombos.some(s=>mkComboId(s)===mkComboId(combo));
+    return'<button onclick="toggleCalcCombo(\''+mkComboId(combo)+'\')" style="display:inline-flex;align-items:center;gap:5px;padding:5px 13px;border-radius:20px;border:1.5px solid '+(on?(cl?.color||'var(--accent)'):'var(--border)')+';background:'+(on?(cl?.color||'#888')+'1a':'transparent')+';cursor:pointer;font-size:12px;font-weight:'+(on?'600':'400')+';color:'+(on?(cl?.color||'var(--accent)'):'var(--text2)')+'"><span style="width:7px;height:7px;border-radius:50%;background:'+(on?(cl?.color||'#888'):'var(--border)')+';flex-shrink:0;display:inline-block"></span>'+mkComboLabel(combo,false)+'</button>';
+  }).join('');
+  const comboSelectorHtml='<div class="card" style="margin-bottom:16px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><span style="font-size:13px;font-weight:600;color:var(--text)">Carriers to Calculate</span><span style="font-size:12px;color:var(--text2)">'+selCombos.length+' / '+availCombos.length+' selected</span>'+(window._calcCombos&&window._calcCombos.length<availCombos.length?'<button class="btn btn-sm" style="margin-left:auto;font-size:11px" onclick="window._calcCombos=null;renderCalculator()">Select All</button>':'')+'</div><div style="display:flex;flex-wrap:wrap;gap:8px">'+comboPills+'</div>'+(selCombos.length===0?'<div style="margin-top:8px;font-size:12px;color:var(--red)">Select at least one carrier to calculate costs.</div>':'')+'</div>';
+
+  // Pre-build combo table header cells
+  const comboHeaderCells=selCombos.map(combo=>{const cl=CARRIERS.find(c=>c.key===combo.key);return'<th style="color:'+(cl?.color||'var(--text)')+'">'+mkComboLabel(combo,true)+'</th>';}).join('');
+
+  // Pre-build combo metric cards
+  const comboMetricCards=selCombos.map(combo=>{const cl=CARRIERS.find(c=>c.key===combo.key);const cnt=r.filter(x=>x.cheapest?.comboId===mkComboId(combo)).length;return'<div class="metric-card"><div class="metric-label" style="color:'+(cl?.color||'var(--text)')+'">'+mkComboLabel(combo,true)+'</div><div class="metric-value" style="color:'+(cl?.color||'var(--text)')+'">'+cnt+'</div></div>';}).join('');
   const totalPages=r.length?Math.ceil(r.length/PAGE):1;
   const pg=Math.min(Math.max(state.calcPage||0,0),totalPages-1);
   state.calcPage=pg;
@@ -806,6 +837,7 @@ function renderCalculator(){
       </div>
     </div>
 
+    ${comboSelectorHtml}
     <button class="btn btn-primary" onclick="runCalcUI()" style="margin-bottom:20px">
       Calculate Costs${admin&&state.shipments.length>0?' ('+state.shipments.length+' boxes)':''}
     </button>
@@ -816,7 +848,7 @@ function renderCalculator(){
       <div class="metric-card"><div class="metric-label">Allocated</div><div class="metric-value">${r.filter(x=>x.cheapest).length}</div></div>
       <div class="metric-card"><div class="metric-label">Total Cost</div><div class="metric-value">$${totalCost.toFixed(2)}</div></div>
       <div class="metric-card"><div class="metric-label">Avg Cost/Box</div><div class="metric-value">$${r.filter(x=>x.cheapest).length?(totalCost/r.filter(x=>x.cheapest).length).toFixed(2):'-'}</div></div>
-      ${carriers.map(c=>`<div class="metric-card"><div class="metric-label" style="color:${c.color}">${c.label.replace('USPS ','').replace(' Ground','')}</div><div class="metric-value" style="color:${c.color}">${c.count}</div></div>`).join('')}
+      ${comboMetricCards}
     </div>
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap">
       <span style="font-size:12px;color:var(--text2)">Showing <strong>${r.length?pStart+1:0}–${pEnd}</strong> of <strong>${r.length}</strong> rows</span>
@@ -828,18 +860,18 @@ function renderCalculator(){
     </div>
     <div class="tbl-wrap" style="max-height:500px;overflow-y:auto">
       <table>
-        <thead><tr><th>Box ID</th><th>AWB</th><th>Postal</th><th>DWS Date</th><th>Marketplace</th><th>Allocated Carrier</th><th>Cost $</th>${CARRIERS.map(c=>`<th style="color:${c.color}">${c.label.replace('USPS ','').replace(' Ground','')}</th>`).join('')}<th>Zone</th><th>Chg Wt (lbs)</th><th>Unit</th><th>Surcharges</th></tr></thead>
+        <thead><tr><th>Box ID</th><th>AWB</th><th>Postal</th><th>DWS Date</th><th>Marketplace</th><th>Allocated Carrier</th><th>Cost $</th>${comboHeaderCells}<th>Zone</th><th>Chg Wt (lbs)</th><th>Unit</th><th>Surcharges</th></tr></thead>
         <tbody>
-          ${pageRows.map((row,i)=>{const g=k=>row.costs.find(c=>c.carrier===k);const a=row.cheapest;const C=a?CARRIERS.find(c=>c.key===a.carrier):null;
+          ${pageRows.map((row,i)=>{const g=id=>row.costs.find(c=>c.comboId===id);const a=row.cheapest;const aC=a?CARRIERS.find(c=>c.key===a.carrier):null;const aLabel=a?(a.partner?a.partner+' · '+(aC?.label||a.carrier):(aC?.label||a.carrier)):'No carrier';const comboCells=selCombos.map(combo=>{const id=mkComboId(combo);const x=g(id);const isC=a?.comboId===id;return'<td class="mono'+(isC?' chosen-cell':'')+'>'+(x?.ok?'$'+x.total.toFixed(2):'<span style="color:var(--text3);font-size:11px">'+(x?.reason?.slice(0,22)||'-')+'</span>')+'</td>';}).join('');
             return`<tr>
               <td class="mono">${row.box.boxId||'-'}</td>
               <td class="mono" style="max-width:120px;overflow:hidden;text-overflow:ellipsis">${row.box.awb||'-'}</td>
               <td class="mono">${row.box.postal}</td>
               <td class="mono" style="font-size:11px">${row.box.dwsDate||'-'}</td>
               <td>${badge('badge-gray',row.box.marketplace||'-')}</td>
-              <td>${C?badge(C.cls,C.label):badge('badge-red','No carrier')}</td>
+              <td>${aC?badge(aC.cls,aLabel):badge('badge-red','No carrier')}</td>
               <td class="mono" style="font-weight:600">${a?'$'+a.total.toFixed(2):'-'}</td>
-              ${CARRIERS.map(c=>{const x=g(c.key);const isC=a?.carrier===c.key;return`<td class="mono${isC?' chosen-cell':''}">${x?.ok?'$'+x.total.toFixed(2):`<span style="color:var(--text3);font-size:11px">${x?.reason?.slice(0,22)||'-'}</span>`}</td>`;}).join('')}
+              ${comboCells}
               <td class="mono">${a?.zone??'-'}</td>
               <td class="mono">${a?a.chgLbs.toFixed(3):'-'}</td>
               <td>${a?badge(a.unit==='OZ'?'badge-orange':'badge-blue',a.unit):'-'}</td>
@@ -1591,7 +1623,9 @@ function runCalcUI(){
     if(!state.shipments.length){show('Upload a shipment file first.','error');return;}
     src=state.shipments;
   }
-  state.results=runCalc(src);state.calcPage=0;renderCalculator();
+  const combos=getSelectedCombos();
+  if(combos.length===0){show('Select at least one carrier to calculate.','error');return;}
+  state.results=runCalc(src,combos);state.calcPage=0;renderCalculator();
 }
 
 // ═══════════════════════════════════════════════════
