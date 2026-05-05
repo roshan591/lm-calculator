@@ -232,9 +232,10 @@ let state = {
   rules:JSON.parse(JSON.stringify(RULES)),
   currentUser: null,
   calcPage:0,
-  dasMap:{},           // carrier → { surcharge_name → { zip5 → rate } }
+  dasMap:{},
   zoneSurchargeMap:JSON.parse(JSON.stringify(DEFAULT_ZONE_SURCHARGES)),
   surchargeThresholds:JSON.parse(JSON.stringify(DEFAULT_THRESHOLDS)),
+  rateCards:[],        // [{key,zone,weight,unit,rate,startDate,endDate}]
 };
 
 // ═══════════════════════════════════════════════════
@@ -245,7 +246,7 @@ function saveUsers(u){localStorage.setItem('lm_users',JSON.stringify(u));}
 function isAdmin(){return state.currentUser?.role==='admin';}
 
 function initSession(){
-  loadSavedRules();loadSavedSurchargeData();loadSavedCarriers();
+  loadSavedRules();loadSavedSurchargeData();loadSavedCarriers();loadSavedRateCards();
   const saved=JSON.parse(localStorage.getItem('lm_session')||'null');
   if(saved){state.currentUser=saved;applyRole();return;}
   const users=loadUsers();
@@ -317,6 +318,18 @@ function applyRole(){
 // ═══════════════════════════════════════════════════
 function saveRules(){localStorage.setItem('lm_rules',JSON.stringify(state.rules));}
 function loadSavedRules(){const s=localStorage.getItem('lm_rules');if(s)try{state.rules=JSON.parse(s);}catch(e){}}
+
+function parseISODate(val){
+  if(!val)return null;
+  if(val instanceof Date){const y=val.getFullYear(),m=String(val.getMonth()+1).padStart(2,'0'),d=String(val.getDate()).padStart(2,'0');return`${y}-${m}-${d}`;}
+  const s=String(val).trim();
+  if(/^\d{4}-\d{2}-\d{2}$/.test(s))return s;
+  const m1=s.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/);
+  if(m1)return`${m1[3]}-${m1[2].padStart(2,'0')}-${m1[1].padStart(2,'0')}`;
+  return null;
+}
+function saveRateCards(){try{localStorage.setItem('lm_ratecards',JSON.stringify(state.rateCards));}catch(e){show('Rate card data too large for storage','error');}}
+function loadSavedRateCards(){try{const s=localStorage.getItem('lm_ratecards');if(s)state.rateCards=JSON.parse(s);}catch(e){}}
 
 function saveSurchargeData(){
   try{
@@ -423,10 +436,18 @@ function resetCarrierRules(carrier){const c=CARRIERS.find(x=>x.key===carrier);st
 
 function uspsZone(z){const p=parseInt(String(z).padStart(5,'0').slice(0,3));if(p<=119||(p>=180&&p<=191))return 2;if((p>=120&&p<=149)||(p>=192&&p<=269))return 3;if((p>=150&&p<=179)||(p>=270&&p<=289)||(p>=430&&p<=499)||(p>=530&&p<=549))return 4;if((p>=290&&p<=349)||(p>=400&&p<=429)||(p>=500&&p<=529)||(p>=550&&p<=599)||(p>=600&&p<=629)||(p>=460&&p<=479))return 5;if((p>=350&&p<=399)||(p>=630&&p<=693)||(p>=700&&p<=729))return 6;if((p>=730&&p<=799)||(p>=570&&p<=589)||(p>=800&&p<=816)||(p>=820&&p<=839)||(p>=870&&p<=888))return 7;return 8;}
 function getRate(rd,svc,zone,wt,unit){const t=rd[svc];if(!t)return null;const z=String(zone);if(unit==='OZ'){const oz=t.oz?.[z];if(oz)return oz[String(Math.min(Math.ceil(wt),16))]??null;}const lb=t.lbs?.[z];if(!lb)return null;const keys=Object.keys(lb).map(Number).sort((a,b)=>a-b);const k=keys.filter(k=>k<=Math.ceil(wt));return k.length?lb[String(k[k.length-1])]:null;}
+function getRateWithDate(svc,zone,wt,unit,dateStr){
+  if(state.rateCards.length>0){
+    const z=String(zone);const ceiling=unit==='OZ'?Math.min(Math.ceil(wt),16):Math.ceil(wt);
+    const matching=state.rateCards.filter(r=>r.key===svc&&String(r.zone)===z&&r.unit===unit&&(!r.startDate||!dateStr||r.startDate<=dateStr)&&(!r.endDate||!dateStr||r.endDate>=dateStr));
+    if(matching.length>0){const tiers=matching.map(r=>({...r,wn:Number(r.weight)})).filter(r=>r.wn<=ceiling).sort((a,b)=>b.wn-a.wn);if(tiers.length>0)return tiers[0].rate;}
+  }
+  return getRate(state.rateData,svc,zone,wt,unit);
+}
 function isMpSvc(rules,carrier,mp){const svc=rules[carrier];if(!svc)return false;const m=(mp||'').toLowerCase();const mps=svc.marketplaces.map(x=>x.toLowerCase());if(mps.includes(m))return true;if(m==='etsy_usa'&&mps.includes('etsy'))return true;if(carrier==='UNIUNI'&&m==='amazon fba'&&mps.includes('amazon'))return true;if(mps.includes('other'))return true;return false;}
 function calcCost(box,carrier){
   const svc=state.rules[carrier];if(!svc)return{ok:false,reason:'Unknown carrier'};
-  const{grossKg,L_cm,W_cm,H_cm,postal,marketplace,isPO}=box;
+  const{grossKg,L_cm,W_cm,H_cm,postal,marketplace,isPO,dwsDate}=box;
   const gLbs=grossKg*2.20462;const Li=L_cm/2.54,Wi=W_cm/2.54,Hi=H_cm/2.54;
   const vCin=Li*Wi*Hi;const sides=[L_cm,W_cm,H_cm].sort((a,b)=>b-a);
   const lgCm=sides[0]+2*(sides[1]+sides[2]);
@@ -441,7 +462,7 @@ function calcCost(box,carrier){
   const chgLbs=Math.max(gLbs,volLbs);
   if(chgLbs>(svc.maxWeight||150))return{ok:false,reason:`Weight ${chgLbs.toFixed(1)}lbs > max`};
   const isOz=(ctype!=='UPS')&&chgLbs<1.0;
-  const base=getRate(state.rateData,carrier,zone,isOz?chgLbs*16:chgLbs,isOz?'OZ':'LBS');
+  const base=getRateWithDate(carrier,zone,isOz?chgLbs*16:chgLbs,isOz?'OZ':'LBS',dwsDate||null);
   if(base==null)return{ok:false,reason:`No rate: ${chgLbs.toFixed(2)}lbs z${zone}`};
   const sur=[];
   if(ctype==='USPS'){const os=svc.oversize;if(os){if(sides[0]>os.L1.t)sur.push({n:'Oversize L1',a:os.L1.c});if(sides[1]>os.L2.t)sur.push({n:'Oversize L2',a:os.L2.c});if(sides[2]>os.L3.t)sur.push({n:'Oversize L3',a:os.L3.c});}const ol=svc.overlength;if(ol){if(sides[0]>ol.t&&sides[0]<=ol.limit)sur.push({n:'Overlength',a:ol.c});if(sides[0]>ol.limit)sur.push({n:'OverlengthLimit',a:ol.lc});}if(svc.overvolume&&vCin>svc.overvolume.t)sur.push({n:'Overvolume',a:svc.overvolume.c});}
@@ -495,7 +516,7 @@ function mapRow(row){
     }
     return null;
   };
-  return{awb:String(g(['awb','tracking number','trackingnumber'])||''),boxId:String(g(['boxes','box_id','box id','boxid'])||''),grossKg:parseFloat(g(['gross weight','grossweight','gross_weight','weight kg','weightkg','gross kg','grosskg'])||0),L_cm:parseFloat(g(['length','l cm','lcm','l_cm','length cm','lengthcm','length(cm)'])||0),W_cm:parseFloat(g(['width','w cm','wcm','w_cm','width cm','widthcm','width(cm)'])||0),H_cm:parseFloat(g(['height','h cm','hcm','h_cm','height cm','heightcm','height(cm)'])||0),postal:String(g(['reciever postal code','receiver postal code','postal code','zip code','zipcode','zip','postalcode','destination zip'])||'').replace(/[^0-9]/g,'').padStart(5,'0'),marketplace:String(g(['market_place','marketplace','market place','marketplace name'])||''),isPO:String(g(['is po address','is_po_address','po address','po box'])||'no').toLowerCase()==='yes'};
+  return{awb:String(g(['awb','tracking number','trackingnumber'])||''),boxId:String(g(['boxes','box_id','box id','boxid'])||''),grossKg:parseFloat(g(['gross weight','grossweight','gross_weight','weight kg','weightkg','gross kg','grosskg'])||0),L_cm:parseFloat(g(['length','l cm','lcm','l_cm','length cm','lengthcm','length(cm)'])||0),W_cm:parseFloat(g(['width','w cm','wcm','w_cm','width cm','widthcm','width(cm)'])||0),H_cm:parseFloat(g(['height','h cm','hcm','h_cm','height cm','heightcm','height(cm)'])||0),postal:String(g(['reciever postal code','receiver postal code','postal code','zip code','zipcode','zip','postalcode','destination zip'])||'').replace(/[^0-9]/g,'').padStart(5,'0'),marketplace:String(g(['market_place','marketplace','market place','marketplace name'])||''),isPO:String(g(['is po address','is_po_address','po address','po box'])||'no').toLowerCase()==='yes',dwsDate:parseISODate(g(['dws date','dwsdate','dws_date','scan date','scandate','scan_date','weigh date','weighdate']))};
 }
 
 // ═══════════════════════════════════════════════════
@@ -515,8 +536,8 @@ function csvEsc(v){const s=String(v??'');return(s.includes(',')||s.includes('"')
 function csvRow(arr){return arr.map(csvEsc).join(',');}
 
 function exportCSV(){
-  const hdr=['Box ID','AWB','Postal','Marketplace','Allocated Carrier','Total ($)',...CARRIERS.map(c=>c.label+' ($)'),'Zone','Chg Wt (lbs)','Vol Wt (lbs)','Unit','Base Rate','Surcharge Total','Surcharges Applied'];
-  const body=state.results.map(r=>{const g=k=>r.costs.find(c=>c.carrier===k);const a=r.cheapest;return csvRow([r.box.boxId,r.box.awb,r.box.postal,r.box.marketplace,a?CARRIERS.find(c=>c.key===a.carrier)?.label:'None',a?.total??'',...CARRIERS.map(c=>{const x=g(c.key);return x?.ok?x.total:'N/A';}),a?.zone??'',a?.chgLbs??'',a?.volLbs??'',a?.unit??'',a?.base??'',a?.surT??'',a?.sur?.map(s=>`${s.n}=$${s.a}`).join('|')??'']);});
+  const hdr=['Box ID','AWB','Postal','DWS Date','Marketplace','Allocated Carrier','Total ($)',...CARRIERS.map(c=>c.label+' ($)'),'Zone','Chg Wt (lbs)','Vol Wt (lbs)','Unit','Base Rate','Surcharge Total','Surcharges Applied'];
+  const body=state.results.map(r=>{const g=k=>r.costs.find(c=>c.carrier===k);const a=r.cheapest;return csvRow([r.box.boxId,r.box.awb,r.box.postal,r.box.dwsDate||'',r.box.marketplace,a?CARRIERS.find(c=>c.key===a.carrier)?.label:'None',a?.total??'',...CARRIERS.map(c=>{const x=g(c.key);return x?.ok?x.total:'N/A';}),a?.zone??'',a?.chgLbs??'',a?.volLbs??'',a?.unit??'',a?.base??'',a?.surT??'',a?.sur?.map(s=>`${s.n}=$${s.a}`).join('|')??'']);});
   const csv=[csvRow(hdr),...body].join('\n');
   const a=document.createElement('a');a.href='data:text/csv,'+encodeURIComponent(csv);a.download='lm_summary_'+new Date().toISOString().slice(0,10)+'.csv';a.click();
 }
@@ -529,7 +550,7 @@ function exportDetailedCSV(){
     `${label} Surcharges (detail)`,`${label} Surcharge Total ($)`,`${label} Final Cost ($)`,
   ];
   const hdr=[
-    'Box ID','AWB','Postal','Marketplace','Gross Wt (kg)','L (cm)','W (cm)','H (cm)',
+    'Box ID','AWB','Postal','DWS Date','Marketplace','Gross Wt (kg)','L (cm)','W (cm)','H (cm)',
     'Cheapest Carrier','Cheapest Cost ($)',
     ...CARRIERS.flatMap(c=>cCols(c.label)),
   ];
@@ -555,7 +576,7 @@ function exportDetailedCSV(){
   const body=state.results.map(r=>{
     const b=r.box;const a=r.cheapest;
     return csvRow([
-      b.boxId,b.awb,b.postal,b.marketplace,b.grossKg,b.L_cm,b.W_cm,b.H_cm,
+      b.boxId,b.awb,b.postal,b.dwsDate||'',b.marketplace,b.grossKg,b.L_cm,b.W_cm,b.H_cm,
       a?CARRIERS.find(c=>c.key===a.carrier)?.label:'No carrier',a?.total??'',
       ...CARRIERS.flatMap(c=>cData(r.costs,c.key)),
     ]);
@@ -567,18 +588,24 @@ function exportDetailedCSV(){
 function downloadTemplate(type){
   const T={
     shipment:{name:'Shipment_Level_Template.csv',rows:[
-      ['AWB','Boxes','Gross Weight','Length','Width','Height','Reciever Postal Code','Market_Place','Is PO Address'],
-      ['TRK100001','BOX-001','0.50','30','20','10','10001','Amazon','no'],
-      ['TRK100002','BOX-002','1.20','40','25','15','90210','Walmart','no'],
-      ['TRK100003','BOX-003','0.80','25','18','8','60601','Etsy','yes'],
-      ['TRK100004','BOX-004','2.50','45','30','20','77001','eBay','no'],
+      ['AWB','Boxes','Gross Weight','Length','Width','Height','Reciever Postal Code','Market_Place','Is PO Address','DWS Date'],
+      ['TRK100001','BOX-001','0.50','30','20','10','10001','Amazon','no','2026-01-15'],
+      ['TRK100002','BOX-002','1.20','40','25','15','90210','Walmart','no','2026-01-15'],
+      ['TRK100003','BOX-003','0.80','25','18','8','60601','Etsy','yes','2026-01-16'],
+      ['TRK100004','BOX-004','2.50','45','30','20','77001','eBay','no','2026-01-16'],
     ]},
     rates:{name:'Rate_Card_Template.csv',rows:[
-      ['Service','Zone','LBS','Unit','Rate'],
-      ['Ground Advantage','1','1','lbs','5.57'],['Ground Advantage','1','2','lbs','5.81'],['Ground Advantage','1','1','oz','3.74'],['Ground Advantage','2','1','lbs','5.63'],
-      ['Priority Mail','1','1','lbs','6.55'],['Priority Mail','2','1','lbs','6.67'],
-      ['UniUni','1','1','lbs','2.79'],['UniUni','2','1','lbs','2.83'],
-      ['UPS','2','1','lbs','6.90'],['UPS','3','1','lbs','6.90'],
+      ['country','partner','carrier','service','Zone','LBS','Unit','Rate','Start date','End date'],
+      ['US','Shipbae','USPS','Ground Advantage','1','1','lbs','5.57','01-01-2026','31-12-2026'],
+      ['US','Shipbae','USPS','Ground Advantage','1','2','lbs','5.81','01-01-2026','31-12-2026'],
+      ['US','Shipbae','USPS','Ground Advantage','1','1','oz','3.74','01-01-2026','31-12-2026'],
+      ['US','Shipbae','USPS','Ground Advantage','2','1','lbs','5.63','01-01-2026','31-12-2026'],
+      ['US','Shipbae','USPS','Priority Mail','1','1','lbs','6.55','01-01-2026','31-12-2026'],
+      ['US','Shipbae','USPS','Priority Mail','2','1','lbs','6.67','01-01-2026','31-12-2026'],
+      ['US','Shipbae','UniUni','Ground','1','1','lbs','2.79','01-01-2026','31-12-2026'],
+      ['US','Shipbae','UniUni','Ground','2','1','lbs','2.83','01-01-2026','31-12-2026'],
+      ['US','Shipbae','UPS','Ground','2','1','lbs','6.90','01-01-2026','31-12-2026'],
+      ['US','Shipbae','UPS','Ground','3','1','lbs','6.90','01-01-2026','31-12-2026'],
     ]},
     rules:{name:'Rules_Reference.csv',rows:[
       ['Carrier','Rule','Value','Notes'],
@@ -638,14 +665,21 @@ function addRateManual(){
   const wt=document.getElementById('mr-wt').value;
   const unit=document.getElementById('mr-unit').value;
   const rate=parseFloat(document.getElementById('mr-rate').value);
+  const sd=document.getElementById('mr-start')?.value||'';
+  const ed=document.getElementById('mr-end')?.value||'';
   if(!svc||!zone||!wt||isNaN(rate)||rate<=0){show('Fill all fields with valid values','error');return;}
-  if(!state.rateData[svc])state.rateData[svc]={oz:{},lbs:{}};
-  const tbl=unit==='OZ'?'oz':'lbs';
-  if(!state.rateData[svc][tbl][zone])state.rateData[svc][tbl][zone]={};
-  state.rateData[svc][tbl][zone][wt]=rate;
-  document.getElementById('mr-wt').value='';
-  document.getElementById('mr-rate').value='';
-  show(`Added: ${CARRIERS.find(c=>c.key===svc)?.label} Zone ${zone} ${wt} ${unit} = $${rate.toFixed(2)}`);
+  if(sd||ed){
+    state.rateCards.push({key:svc,zone,weight:wt,unit,rate,startDate:sd,endDate:ed});
+    saveRateCards();
+    show(`Added dated rate: ${CARRIERS.find(c=>c.key===svc)?.label} Zone ${zone} ${wt}${unit} $${rate.toFixed(2)} [${sd||'any'}→${ed||'any'}]`);
+  }else{
+    if(!state.rateData[svc])state.rateData[svc]={oz:{},lbs:{}};
+    const tbl=unit==='OZ'?'oz':'lbs';
+    if(!state.rateData[svc][tbl][zone])state.rateData[svc][tbl][zone]={};
+    state.rateData[svc][tbl][zone][wt]=rate;
+    show(`Added base rate: ${CARRIERS.find(c=>c.key===svc)?.label} Zone ${zone} ${wt}${unit} $${rate.toFixed(2)}`);
+  }
+  document.getElementById('mr-wt').value='';document.getElementById('mr-rate').value='';
   renderRates();
 }
 function addZoneManual(){
@@ -764,6 +798,7 @@ function renderCalculator(){
               <option>Amazon FBA</option><option>Tiktok</option><option>FAIRE</option><option>Other</option>
             </select>
           </div>
+          <div class="form-group"><label class="lbl">DWS Date <span style="color:var(--text3);font-weight:400">(for rate lookup)</span></label><input class="inp" id="m-dws" type="date" value="${new Date().toISOString().slice(0,10)}"/></div>
         </div>
         <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer"><input type="checkbox" id="m-po"/> PO Box address</label>
       </div>
@@ -791,13 +826,14 @@ function renderCalculator(){
     </div>
     <div class="tbl-wrap" style="max-height:500px;overflow-y:auto">
       <table>
-        <thead><tr><th>Box ID</th><th>AWB</th><th>Postal</th><th>Marketplace</th><th>Allocated Carrier</th><th>Cost $</th>${CARRIERS.map(c=>`<th style="color:${c.color}">${c.label.replace('USPS ','').replace(' Ground','')}</th>`).join('')}<th>Zone</th><th>Chg Wt (lbs)</th><th>Unit</th><th>Surcharges</th></tr></thead>
+        <thead><tr><th>Box ID</th><th>AWB</th><th>Postal</th><th>DWS Date</th><th>Marketplace</th><th>Allocated Carrier</th><th>Cost $</th>${CARRIERS.map(c=>`<th style="color:${c.color}">${c.label.replace('USPS ','').replace(' Ground','')}</th>`).join('')}<th>Zone</th><th>Chg Wt (lbs)</th><th>Unit</th><th>Surcharges</th></tr></thead>
         <tbody>
           ${pageRows.map((row,i)=>{const g=k=>row.costs.find(c=>c.carrier===k);const a=row.cheapest;const C=a?CARRIERS.find(c=>c.key===a.carrier):null;
             return`<tr>
               <td class="mono">${row.box.boxId||'-'}</td>
               <td class="mono" style="max-width:120px;overflow:hidden;text-overflow:ellipsis">${row.box.awb||'-'}</td>
               <td class="mono">${row.box.postal}</td>
+              <td class="mono" style="font-size:11px">${row.box.dwsDate||'-'}</td>
               <td>${badge('badge-gray',row.box.marketplace||'-')}</td>
               <td>${C?badge(C.cls,C.label):badge('badge-red','No carrier')}</td>
               <td class="mono" style="font-weight:600">${a?'$'+a.total.toFixed(2):'-'}</td>
@@ -818,9 +854,14 @@ function renderRates(){
   const admin=isAdmin();
   const svc=window._rateFilter||'USPS_GA';
   const zone=window._rateZone||'8';
+  const viewDate=window._rateViewDate||new Date().toISOString().slice(0,10);
   const t=state.rateData[svc];
   const zones=Object.keys(t?.lbs||t?.oz||{}).sort((a,b)=>+a-+b);
-  const rows=[...Object.entries(t?.oz?.[zone]||{}).map(([w,r])=>({w:+w,u:'OZ',r})),...Object.entries(t?.lbs?.[zone]||{}).map(([w,r])=>({w:+w,u:'LBS',r}))].sort((a,b)=>a.u==='OZ'&&b.u==='LBS'?-1:a.u==='LBS'&&b.u==='OZ'?1:a.w-b.w);
+  // Merge base rates + dated rate cards, date-card overrides base for active entries
+  const baseRows=[...Object.entries(t?.oz?.[zone]||{}).map(([w,r])=>({w:+w,u:'OZ',r,sd:'',ed:'',src:'base',active:true})),...Object.entries(t?.lbs?.[zone]||{}).map(([w,r])=>({w:+w,u:'LBS',r,sd:'',ed:'',src:'base',active:true}))];
+  const cardRows=state.rateCards.filter(rc=>rc.key===svc&&String(rc.zone)===zone).map(rc=>({w:+rc.weight,u:rc.unit,r:rc.rate,sd:rc.startDate||'',ed:rc.endDate||'',src:'dated',active:(!rc.startDate||rc.startDate<=viewDate)&&(!rc.endDate||rc.endDate>=viewDate)}));
+  const activeDatedKeys=new Set(cardRows.filter(r=>r.active).map(r=>`${r.w}_${r.u}`));
+  const rows=[...baseRows.filter(r=>!activeDatedKeys.has(`${r.w}_${r.u}`)),...cardRows].sort((a,b)=>a.u==='OZ'&&b.u==='LBS'?-1:a.u==='LBS'&&b.u==='OZ'?1:a.w-b.w||(a.sd>b.sd?1:-1));
 
   const rateMode=window._rateMode||'view';
   el.innerHTML=`
@@ -838,10 +879,11 @@ function renderRates(){
       <div class="upload-zone" onclick="$('#rate-input').click()">
         <div class="upload-zone-icon"><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20 26V8m0 0l-6 6m6-6l6 6"/><path d="M4 28l1.3 5.2A2 2 0 007.2 35h25.6a2 2 0 001.9-1.8L36 28"/></svg></div>
         <div class="upload-zone-label">Drop rate card file here or click to browse</div>
-        <div class="upload-zone-hint">Columns: Service, Zone, LBS, Unit, Rate — use Download Template above</div>
+        <div class="upload-zone-hint">Columns: country · carrier · service · Zone · LBS · Unit · Rate · Start date · End date</div>
       </div>
-      <input type="file" id="rate-input" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleRateFile(event)"/>`:`
-      <div class="form-grid" style="margin-bottom:12px">
+      <input type="file" id="rate-input" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleRateFile(event)"/>
+      ${state.rateCards.length>0?`<div style="margin-top:8px;font-size:12px;color:var(--teal)">${state.rateCards.length} dated rate entries loaded &nbsp;<button class="btn btn-sm btn-danger" style="font-size:11px;padding:2px 8px" onclick="state.rateCards=[];saveRateCards();renderRates()">Clear All Dated Rates</button></div>`:''}`:`
+      <div class="form-grid" style="margin-bottom:10px">
         <div class="form-group" style="margin:0"><label class="lbl">Service</label>
           <select class="inp" id="mr-svc">
             ${CARRIERS.map(c=>`<option value="${c.key}">${c.label}</option>`).join('')}
@@ -861,10 +903,17 @@ function renderRates(){
         <div class="form-group" style="margin:0"><label class="lbl">Rate (USD)</label>
           <input class="inp" id="mr-rate" type="number" placeholder="e.g. 6.57" min="0.01" step="0.01"/>
         </div>
+        <div class="form-group" style="margin:0"><label class="lbl">Start Date <span style="color:var(--text3);font-weight:400">(optional)</span></label>
+          <input class="inp" id="mr-start" type="date"/>
+        </div>
+        <div class="form-group" style="margin:0"><label class="lbl">End Date <span style="color:var(--text3);font-weight:400">(optional)</span></label>
+          <input class="inp" id="mr-end" type="date"/>
+        </div>
         <div class="form-group" style="margin:0;display:flex;align-items:flex-end">
           <button class="btn btn-primary" style="width:100%" onclick="addRateManual()">Add Rate</button>
         </div>
-      </div>`}
+      </div>
+      <div style="font-size:12px;color:var(--text2)">Leave Start/End date blank for a base rate (always active). With dates the rate only applies when shipment DWS date falls within the range.</div>`}
     </div>`:`
     <div class="card" style="background:var(--surface2);border-style:dashed;text-align:center;padding:18px;margin-bottom:16px">
       <span style="font-size:13px;color:var(--text2)">Rate card upload is restricted to Admins</span>
@@ -881,12 +930,22 @@ function renderRates(){
             ${zones.map(z=>`<option value="${z}"${z===zone?' selected':''}>Zone ${z}</option>`).join('')}
           </select>
         </div>
-        <span style="font-size:12px;color:var(--text2);padding-bottom:8px">${rows.length} entries for Zone ${zone} · ${CARRIERS.find(c=>c.key===svc)?.label}</span>
+        <div class="form-group" style="margin:0"><label class="lbl">View as of (DWS date)</label>
+          <input class="inp" type="date" style="width:150px" value="${viewDate}" onchange="window._rateViewDate=this.value;renderRates()"/>
+        </div>
+        <span style="font-size:12px;color:var(--text2);padding-bottom:8px">${rows.length} entries · Zone ${zone} · ${CARRIERS.find(c=>c.key===svc)?.label}</span>
       </div>
       <div style="max-height:420px;overflow-y:auto">
         <table>
-          <thead><tr><th>Weight</th><th>Unit</th><th>Rate (USD)</th></tr></thead>
-          <tbody>${rows.map((r,i)=>`<tr style="${i%2?'background:var(--surface2)':''}"><td class="mono">${r.w}</td><td>${badge(r.u==='OZ'?'badge-orange':'badge-blue',r.u)}</td><td class="mono" style="font-weight:600">$${r.r.toFixed(2)}</td></tr>`).join('')}</tbody>
+          <thead><tr><th>Weight</th><th>Unit</th><th>Rate (USD)</th><th>Valid From</th><th>Valid To</th><th>Status</th></tr></thead>
+          <tbody>${rows.map((r,i)=>`<tr style="${i%2?'background:var(--surface2)':''}${r.src==='dated'&&r.active?';border-left:3px solid var(--teal)':''}">
+            <td class="mono">${r.w}</td>
+            <td>${badge(r.u==='OZ'?'badge-orange':'badge-blue',r.u)}</td>
+            <td class="mono" style="font-weight:600">$${r.r.toFixed(2)}</td>
+            <td class="mono" style="font-size:11px;color:var(--text2)">${r.sd||'—'}</td>
+            <td class="mono" style="font-size:11px;color:var(--text2)">${r.ed||'—'}</td>
+            <td>${r.src==='base'?badge('badge-gray','Base'):r.active?badge('badge-blue','Active'):badge('badge-red','Inactive')}</td>
+          </tr>`).join('')}</tbody>
         </table>
       </div>
     </div>
@@ -1415,9 +1474,36 @@ async function handleShipFile(e){
 
 async function handleRateFile(e){
   const f=e.target.files[0];if(!f)return;
-  try{const buf=await f.arrayBuffer();const rows=parseXlsx(new Uint8Array(buf));let n=0;
-    rows.forEach(r=>{const s=String(r.Service||r.service||'');const z=String(r.Zone||r.zone||'');const w=String(r.LBS||r.lbs||r.Weight||'');const u=String(r.Unit||r.unit||'lbs').toLowerCase();const rate=parseFloat(r.Rate||r.rate||0);const sk=s.includes('GROUND_ADVANTAGE')||s.includes('Ground Advantage')?'USPS_GA':s.includes('PRIORITY')||s.includes('Priority Mail')?'USPS_PM':s.includes('UniUni')||s.includes('UNIUNI')?'UNIUNI':s.includes('UPS')?'UPS':null;if(!sk||!z||!w||!rate)return;if(!state.rateData[sk])state.rateData[sk]={oz:{},lbs:{}};const tbl=u.includes('oz')?'oz':'lbs';if(!state.rateData[sk][tbl][z])state.rateData[sk][tbl][z]={};state.rateData[sk][tbl][z][w]=rate;n++;});
-    show(`Updated ${n} rate entries from ${f.name}`);renderRates();}
+  try{const buf=await f.arrayBuffer();const rows=parseXlsx(new Uint8Array(buf));let nBase=0,nDated=0;
+    rows.forEach(r=>{
+      const s=String(r.Service||r.service||r.service_name||'');
+      const carr=String(r.Carrier||r.carrier||'');
+      const z=String(r.Zone||r.zone||'');
+      const w=String(r.LBS||r.lbs||r.Weight||r.weight||'');
+      const u=String(r.Unit||r.unit||'lbs').toLowerCase();
+      const rate=parseFloat(r.Rate||r.rate||0);
+      const sd=parseISODate(r['Start date']||r['Start Date']||r.start_date||r.StartDate||null);
+      const ed=parseISODate(r['End date']||r['End Date']||r.end_date||r.EndDate||null);
+      const sLow=(s+' '+carr).toLowerCase();
+      let sk=null;
+      if(sLow.includes('ground advantage'))sk='USPS_GA';
+      else if(sLow.includes('priority mail')||sLow.includes('priority'))sk='USPS_PM';
+      else if(sLow.includes('uniuni')||carr.toLowerCase().includes('uniuni'))sk='UNIUNI';
+      else if(sLow.includes('ups')||carr.toLowerCase()==='ups')sk='UPS';
+      else{const found=CARRIERS.find(c=>c.label.toLowerCase()===s.toLowerCase()||c.key===s.toUpperCase()||c.label.toLowerCase()===carr.toLowerCase());if(found)sk=found.key;}
+      if(!sk||!z||!w||!rate)return;
+      if(sd||ed){
+        state.rateCards.push({key:sk,zone:z,weight:w,unit:u.includes('oz')?'OZ':'LBS',rate,startDate:sd||'',endDate:ed||''});
+        nDated++;
+      }else{
+        if(!state.rateData[sk])state.rateData[sk]={oz:{},lbs:{}};
+        const tbl=u.includes('oz')?'oz':'lbs';
+        if(!state.rateData[sk][tbl][z])state.rateData[sk][tbl][z]={};
+        state.rateData[sk][tbl][z][w]=rate;nBase++;
+      }
+    });
+    saveRateCards();
+    show(`Loaded: ${nDated} dated + ${nBase} base rate entries from ${f.name}`);renderRates();}
   catch(err){show('Failed to parse: '+err.message,'error');}
 }
 
@@ -1434,7 +1520,7 @@ function runCalcUI(){
   const mode=admin?($('.tab-pill.active')?.textContent?.includes('Manual')?'manual':'upload'):'manual';
   let src;
   if(mode==='manual'){
-    src=[{awb:'MANUAL',boxId:'BOX-1',grossKg:parseFloat($('#m-gw').value)||0,L_cm:parseFloat($('#m-l').value)||0,W_cm:parseFloat($('#m-w').value)||0,H_cm:parseFloat($('#m-h').value)||0,postal:$('#m-zip').value.padStart(5,'0'),marketplace:$('#m-mp').value,isPO:$('#m-po').checked}];
+    src=[{awb:'MANUAL',boxId:'BOX-1',grossKg:parseFloat($('#m-gw').value)||0,L_cm:parseFloat($('#m-l').value)||0,W_cm:parseFloat($('#m-w').value)||0,H_cm:parseFloat($('#m-h').value)||0,postal:$('#m-zip').value.padStart(5,'0'),marketplace:$('#m-mp').value,isPO:$('#m-po').checked,dwsDate:$('#m-dws')?.value||null}];
   }else{
     if(!state.shipments.length){show('Upload a shipment file first.','error');return;}
     src=state.shipments;
