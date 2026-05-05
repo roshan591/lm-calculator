@@ -668,9 +668,10 @@ function addRateManual(){
   const sd=document.getElementById('mr-start')?.value||'';
   const ed=document.getElementById('mr-end')?.value||'';
   const partner=(document.getElementById('mr-partner')?.value||'').trim();
+  const country=(document.getElementById('mr-country')?.value||'US').trim();
   if(!svc||!zone||!wt||isNaN(rate)||rate<=0){show('Fill all fields with valid values','error');return;}
   if(sd||ed||partner){
-    state.rateCards.push({key:svc,zone,weight:wt,unit,rate,startDate:sd,endDate:ed,partner});
+    state.rateCards.push({key:svc,zone,weight:wt,unit,rate,startDate:sd,endDate:ed,partner,country});
     saveRateCards();
     show(`Added dated rate: ${CARRIERS.find(c=>c.key===svc)?.label} Zone ${zone} ${wt}${unit} $${rate.toFixed(2)} [${sd||'any'}→${ed||'any'}]`);
   }else{
@@ -850,6 +851,14 @@ function renderCalculator(){
   `;
 }
 
+function toggleCompareCarrier(key){
+  if(!window._compareCarriers)window._compareCarriers=CARRIERS.map(c=>c.key);
+  const idx=window._compareCarriers.indexOf(key);
+  if(idx>=0){if(window._compareCarriers.length>1)window._compareCarriers.splice(idx,1);}
+  else window._compareCarriers.push(key);
+  renderRates();
+}
+
 function renderRates(){
   const el=$('#tab-rates');
   const admin=isAdmin();
@@ -859,206 +868,150 @@ function renderRates(){
   const rateMode=window._rateMode||'upload';
   const rateView=window._rateView||'table';
   const unitFilter=window._rateUnit||'ALL';
+  const countryFilter=window._rateCountry||'';
+  const partnerFilter=window._ratePartner||'';
+  const weightFilter=window._rateWeightFilter||'';
+  if(!window._compareCarriers)window._compareCarriers=CARRIERS.map(c=>c.key);
+  const cmpKeys=window._compareCarriers;
   const t=state.rateData[svc];
   const svcLabel=CARRIERS.find(c=>c.key===svc)?.label||svc;
-  const zones=Object.keys(t?.lbs||t?.oz||{}).sort((a,b)=>+a-+b);
+  const tableZones=Object.keys(t?.lbs||t?.oz||{}).sort((a,b)=>+a-+b);
+  const compareZones=[...new Set(CARRIERS.flatMap(c=>{const td=state.rateData[c.key];return[...Object.keys(td?.lbs||{}),...Object.keys(td?.oz||{})];}))].sort((a,b)=>+a-+b);
+  const zones=rateView==='compare'?compareZones:tableZones;
 
-  // --- Table view data ---
+  // Dynamic filter options
+  const allCountries=[...new Set(state.rateCards.map(r=>r.country).filter(Boolean))].sort();
+  const allPartners=[...new Set(state.rateCards.filter(r=>!countryFilter||r.country===countryFilter).map(r=>r.partner).filter(Boolean))].sort();
+
+  // === Rate Table data ===
   const baseRows=[
-    ...Object.entries(t?.oz?.[zone]||{}).map(([w,r])=>({w:+w,u:'OZ',r,sd:'',ed:'',partner:'Base',src:'base',active:true})),
-    ...Object.entries(t?.lbs?.[zone]||{}).map(([w,r])=>({w:+w,u:'LBS',r,sd:'',ed:'',partner:'Base',src:'base',active:true}))
+    ...Object.entries(t?.oz?.[zone]||{}).map(([w,r])=>({w:+w,u:'OZ',r,sd:'',ed:'',partner:'Base',country:'',src:'base',active:true})),
+    ...Object.entries(t?.lbs?.[zone]||{}).map(([w,r])=>({w:+w,u:'LBS',r,sd:'',ed:'',partner:'Base',country:'',src:'base',active:true}))
   ];
   const cardRows=state.rateCards.filter(rc=>rc.key===svc&&String(rc.zone)===zone).map(rc=>({
-    w:+rc.weight,u:rc.unit,r:rc.rate,sd:rc.startDate||'',ed:rc.endDate||'',partner:rc.partner||'—',src:'dated',
+    w:+rc.weight,u:rc.unit,r:rc.rate,sd:rc.startDate||'',ed:rc.endDate||'',
+    partner:rc.partner||'—',country:rc.country||'',src:'dated',
     active:(!rc.startDate||rc.startDate<=viewDate)&&(!rc.endDate||rc.endDate>=viewDate)
   }));
   const activeDatedKeys=new Set(cardRows.filter(r=>r.active).map(r=>r.w+'_'+r.u));
   let tableRows=[...baseRows.filter(r=>!activeDatedKeys.has(r.w+'_'+r.u)),...cardRows]
     .sort((a,b)=>a.u==='OZ'&&b.u==='LBS'?-1:a.u==='LBS'&&b.u==='OZ'?1:a.w-b.w||(a.sd>b.sd?1:-1));
   if(unitFilter!=='ALL')tableRows=tableRows.filter(r=>r.u===unitFilter);
+  if(countryFilter)tableRows=tableRows.filter(r=>!r.country||r.country===countryFilter);
+  if(partnerFilter)tableRows=tableRows.filter(r=>r.partner===partnerFilter||r.src==='base');
+  if(weightFilter)tableRows=tableRows.filter(r=>r.w===+weightFilter);
 
-  // --- Compare view data ---
-  const partners=[...new Set(state.rateCards.filter(rc=>rc.key===svc&&String(rc.zone)===zone&&rc.partner).map(rc=>rc.partner))].sort();
-  const wuSet=new Set([...baseRows,...cardRows].map(r=>r.w+'|'+r.u));
-  let allWU=[...wuSet].map(s=>{const[w,u]=s.split('|');return{w:+w,u};}).sort((a,b)=>a.u==='OZ'&&b.u==='LBS'?-1:a.u==='LBS'&&b.u==='OZ'?1:a.w-b.w);
+  // === Compare Carriers data ===
+  const wuSet=new Set();
+  cmpKeys.forEach(ck=>{
+    state.rateCards.filter(rc=>rc.key===ck&&String(rc.zone)===zone&&
+      (!countryFilter||rc.country===countryFilter)&&(!partnerFilter||rc.partner===partnerFilter)
+    ).forEach(rc=>wuSet.add(rc.weight+'|'+rc.unit));
+    const td=state.rateData[ck];
+    if(td?.lbs?.[zone])Object.keys(td.lbs[zone]).forEach(w=>wuSet.add(w+'|LBS'));
+    if(td?.oz?.[zone])Object.keys(td.oz[zone]).forEach(w=>wuSet.add(w+'|OZ'));
+  });
+  let allWU=[...wuSet].map(s=>{const[w,u]=s.split('|');return{w:+w,u};})
+    .sort((a,b)=>a.u==='OZ'&&b.u==='LBS'?-1:a.u==='LBS'&&b.u==='OZ'?1:a.w-b.w);
   if(unitFilter!=='ALL')allWU=allWU.filter(r=>r.u===unitFilter);
+  if(weightFilter)allWU=allWU.filter(r=>r.w===+weightFilter);
 
   const compareMatrix=allWU.map(({w,u})=>{
-    const pRates={};
-    partners.forEach(p=>{
-      const m=state.rateCards.filter(rc=>rc.key===svc&&String(rc.zone)===zone&&rc.unit===u&&Number(rc.weight)===w&&rc.partner===p&&(!rc.startDate||rc.startDate<=viewDate)&&(!rc.endDate||rc.endDate>=viewDate));
-      if(m.length)pRates[p]=Math.min(...m.map(r=>r.rate));
+    const cRates={};
+    cmpKeys.forEach(ck=>{
+      const matching=state.rateCards.filter(rc=>
+        rc.key===ck&&String(rc.zone)===zone&&rc.unit===u&&Number(rc.weight)===w&&
+        (!countryFilter||rc.country===countryFilter)&&(!partnerFilter||rc.partner===partnerFilter)&&
+        (!rc.startDate||rc.startDate<=viewDate)&&(!rc.endDate||rc.endDate>=viewDate)
+      );
+      if(matching.length){cRates[ck]=Math.min(...matching.map(r=>r.rate));}
+      else{
+        const td=state.rateData[ck];
+        if(u==='OZ'){const oz=td?.oz?.[zone];if(oz){const ks=Object.keys(oz).map(Number).filter(k=>k<=w).sort((a,b)=>b-a);if(ks.length)cRates[ck]=oz[String(ks[0])];}}
+        else{const lb=td?.lbs?.[zone];if(lb){const ks=Object.keys(lb).map(Number).filter(k=>k<=w).sort((a,b)=>b-a);if(ks.length)cRates[ck]=lb[String(ks[0])];}}
+      }
     });
-    let baseRate=null;
-    if(u==='OZ'){const oz=t?.oz?.[zone];if(oz){const ks=Object.keys(oz).map(Number).filter(k=>k<=w).sort((a,b)=>b-a);if(ks.length)baseRate=oz[String(ks[0])];}}
-    else{const lb=t?.lbs?.[zone];if(lb){const ks=Object.keys(lb).map(Number).filter(k=>k<=w).sort((a,b)=>b-a);if(ks.length)baseRate=lb[String(ks[0])];}}
-    const allR=[...Object.values(pRates),baseRate].filter(r=>r!=null);
+    const allR=Object.values(cRates).filter(r=>r!=null);
     const minRate=allR.length?Math.min(...allR):null;
-    const cheapestName=minRate!=null?[...partners.filter(p=>pRates[p]===minRate),(baseRate===minRate?'Base':null)].filter(Boolean)[0]:null;
-    const mkCell=r=>{
-      if(r==null)return'<td style="text-align:right;padding:5px 10px"><span style="color:var(--text3);font-size:11px">—</span></td>';
-      const isMin=r===minRate;const pct=!isMin&&minRate?((r-minRate)/minRate*100).toFixed(1):null;
-      return'<td style="text-align:right;padding:5px 10px"><span class="mono" style="font-weight:'+(isMin?'700':'500')+';color:'+(isMin?'var(--teal)':'var(--text)')+'">$'+r.toFixed(2)+'</span>'+(pct?'<span style="font-size:10px;color:var(--red);margin-left:3px">+'+pct+'%</span>':'')+'</td>';
-    };
-    return{w,u,pRates,baseRate,minRate,cheapestName,mkCell};
+    const cheapestKey=minRate!=null?cmpKeys.find(ck=>cRates[ck]===minRate):null;
+    const cheapestLabel=cheapestKey?(CARRIERS.find(c=>c.key===cheapestKey)?.label||cheapestKey):null;
+    return{w,u,cRates,minRate,cheapestKey,cheapestLabel};
   });
 
-  // --- Pre-build section HTML ---
-  const allPartners=[...new Set(state.rateCards.map(r=>r.partner).filter(Boolean))];
+  // === Pre-build HTML strings (avoids nested template literals) ===
+  const allPartnersAll=[...new Set(state.rateCards.map(r=>r.partner).filter(Boolean))];
   const statsLine=state.rateCards.length>0
-    ?state.rateCards.length+' dated entries &nbsp;·&nbsp; '+allPartners.length+' partner'+(allPartners.length!==1?'s':'')+': <strong>'+allPartners.join(', ')+'</strong>'
+    ?state.rateCards.length+' dated entries &nbsp;&middot;&nbsp; '+allPartnersAll.length+' partner'+(allPartnersAll.length!==1?'s':'')+': <strong>'+allPartnersAll.join(', ')+'</strong>'
     :'No dated rate cards loaded yet';
 
+  const mkCell=(r,minRate)=>{
+    if(r==null)return'<td style="text-align:right;padding:5px 10px"><span style="color:var(--text3);font-size:11px">—</span></td>';
+    const isMin=r===minRate;const pct=!isMin&&minRate?((r-minRate)/minRate*100).toFixed(1):null;
+    return'<td style="text-align:right;padding:5px 10px"><span class="mono" style="font-weight:'+(isMin?'700':'500')+';color:'+(isMin?'var(--teal)':'var(--text)')+'">$'+r.toFixed(2)+'</span>'+(pct?'<span style="font-size:10px;color:var(--red);margin-left:3px">+'+pct+'%</span>':'')+'</td>';
+  };
+
   const compareBody=compareMatrix.map((row,i)=>{
-    const{w,u,pRates,baseRate,minRate,cheapestName,mkCell}=row;
-    return'<tr style="'+(i%2?'background:var(--surface2)':'')+'">'
-      +'<td class="mono" style="padding:5px 12px;font-weight:600">'+w+'</td>'
-      +'<td style="padding:5px 8px">'+badge(u==='OZ'?'badge-orange':'badge-blue',u)+'</td>'
-      +partners.map(p=>mkCell(pRates[p]??null)).join('')
-      +mkCell(baseRate)
-      +'<td style="padding:5px 12px">'+(minRate!=null?'<span style="font-size:13px;font-weight:700;color:var(--teal)">$'+minRate.toFixed(2)+'</span><span style="font-size:11px;color:var(--text2);margin-left:6px">'+cheapestName+'</span>':'-')+'</td>'
-      +'</tr>';
+    const{w,u,cRates,minRate,cheapestLabel}=row;
+    return'<tr style="'+(i%2?'background:var(--surface2)':'')+'"><td class="mono" style="padding:5px 12px;font-weight:600">'+w+'</td><td style="padding:5px 8px">'+badge(u==='OZ'?'badge-orange':'badge-blue',u)+'</td>'
+      +cmpKeys.map(ck=>mkCell(cRates[ck]??null,minRate)).join('')
+      +'<td style="padding:5px 12px">'+(minRate!=null?'<span style="font-size:13px;font-weight:700;color:var(--teal)">$'+minRate.toFixed(2)+'</span><span style="font-size:11px;color:var(--text2);margin-left:6px">'+cheapestLabel+'</span>':'—')+'</td></tr>';
   }).join('');
+
+  const tableBody=tableRows.map((r,i)=>
+    '<tr style="'+(i%2?'background:var(--surface2)':'')+(r.src==='dated'&&r.active?';border-left:3px solid var(--teal)':'')+'"><td class="mono">'+r.w+'</td><td>'+badge(r.u==='OZ'?'badge-orange':'badge-blue',r.u)+'</td><td style="font-size:12px;color:var(--text3)">'+r.country+'</td><td style="font-size:12px;font-weight:600;color:var(--text2)">'+r.partner+'</td><td class="mono" style="font-weight:700">$'+r.r.toFixed(2)+'</td><td class="mono" style="font-size:11px;color:var(--text2)">'+(r.sd||'—')+'</td><td class="mono" style="font-size:11px;color:var(--text2)">'+(r.ed||'—')+'</td><td>'+(r.src==='base'?badge('badge-gray','Base'):r.active?badge('badge-blue','Active'):badge('badge-red','Inactive'))+'</td></tr>'
+  ).join('');
+
+  const carrierPills=CARRIERS.map(c=>{
+    const on=cmpKeys.includes(c.key);
+    return'<button onclick="toggleCompareCarrier(\''+c.key+'\')" style="display:inline-flex;align-items:center;gap:5px;padding:5px 13px;border-radius:20px;border:1.5px solid '+(on?c.color:'var(--border)')+';background:'+(on?c.color+'1a':'transparent')+';cursor:pointer;font-size:12px;font-weight:'+(on?'600':'400')+';color:'+(on?c.color:'var(--text2)')+'"><span style="width:7px;height:7px;border-radius:50%;background:'+(on?c.color:'var(--border)')+';flex-shrink:0;display:inline-block"></span>'+c.label+'</button>';
+  }).join('');
+
+  const countryOpts='<option value="">All Countries</option>'+allCountries.map(c=>'<option value="'+c+'"'+(c===countryFilter?' selected':'')+'>'+c+'</option>').join('');
+  const partnerOpts='<option value="">All Partners</option>'+allPartners.map(p=>'<option value="'+p+'"'+(p===partnerFilter?' selected':'')+'>'+p+'</option>').join('');
+  const svcOpts=CARRIERS.map(c=>'<option value="'+c.key+'"'+(c.key===svc?' selected':'')+'>'+c.label+'</option>').join('');
+  const zoneOpts=zones.map(z=>'<option value="'+z+'"'+(z===zone?' selected':'')+'>'+'Zone '+z+'</option>').join('');
+  const manualZoneOpts='<option value="1">Zone 1</option><option value="2">Zone 2</option><option value="3">Zone 3</option><option value="4">Zone 4</option><option value="5">Zone 5</option><option value="6">Zone 6</option><option value="7">Zone 7</option><option value="8" selected>Zone 8</option>';
+
+  const filterBar='<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:16px;padding-bottom:14px;border-bottom:1px solid var(--border)">'
+    +'<div class="form-group" style="margin:0"><label class="lbl">Country</label><select class="inp" style="width:115px" onchange="window._rateCountry=this.value;renderRates()">'+countryOpts+'</select></div>'
+    +'<div class="form-group" style="margin:0"><label class="lbl">Partner</label><select class="inp" style="width:130px" onchange="window._ratePartner=this.value;renderRates()">'+partnerOpts+'</select></div>'
+    +(rateView==='table'?'<div class="form-group" style="margin:0"><label class="lbl">Carrier / Service</label><select class="inp" style="width:185px" onchange="window._rateFilter=this.value;renderRates()">'+svcOpts+'</select></div>':'')
+    +'<div class="form-group" style="margin:0"><label class="lbl">Zone</label><select class="inp" style="width:90px" onchange="window._rateZone=this.value;renderRates()">'+zoneOpts+'</select></div>'
+    +'<div class="form-group" style="margin:0"><label class="lbl">Weight</label><input class="inp" type="number" style="width:86px" placeholder="All" value="'+weightFilter+'" onchange="window._rateWeightFilter=this.value;renderRates()"/></div>'
+    +'<div class="form-group" style="margin:0"><label class="lbl">Unit</label><select class="inp" style="width:80px" onchange="window._rateUnit=this.value;renderRates()"><option value="ALL"'+(unitFilter==='ALL'?' selected':'')+'>All</option><option value="LBS"'+(unitFilter==='LBS'?' selected':'')+'>LBS</option><option value="OZ"'+(unitFilter==='OZ'?' selected':'')+'>OZ</option></select></div>'
+    +'<div class="form-group" style="margin:0"><label class="lbl">DWS Date</label><input class="inp" type="date" style="width:148px" value="'+viewDate+'" onchange="window._rateViewDate=this.value;renderRates()"/></div>'
+    +'<div style="margin-left:auto;display:flex;align-items:flex-end"><div class="tab-pills"><button class="tab-pill'+(rateView==='table'?' active':'')+'" onclick="window._rateView=\'table\';renderRates()">Rate Table</button><button class="tab-pill'+(rateView==='compare'?' active':'')+'" onclick="window._rateView=\'compare\';renderRates()">Compare Carriers</button></div></div>'
+  +'</div>';
+
+  const compareHdr='<tr style="background:var(--surface2)"><th style="padding:9px 12px;text-align:left;font-size:11px;color:var(--text2)">Weight</th><th style="padding:9px 8px;text-align:left;font-size:11px;color:var(--text2)">Unit</th>'
+    +cmpKeys.map(ck=>{const cl=CARRIERS.find(c=>c.key===ck);return'<th style="padding:9px 14px;text-align:right;font-size:11px;color:'+(cl?.color||'var(--text)')+';font-weight:600">'+(cl?.label||ck)+'</th>';}).join('')
+    +'<th style="padding:9px 12px;text-align:left;font-size:11px;color:var(--teal);font-weight:600">Cheapest</th></tr>';
+
+  const uploadSection=admin
+    ?'<div class="card" style="margin-bottom:16px"><div class="tab-pills" style="margin-bottom:14px"><button class="tab-pill'+(rateMode==='upload'?' active':'')+'" onclick="window._rateMode=\'upload\';renderRates()">Bulk Upload</button><button class="tab-pill'+(rateMode==='manual'?' active':'')+'" onclick="window._rateMode=\'manual\';renderRates()">Manual Add</button></div>'
+      +(rateMode==='upload'
+        ?'<div class="upload-zone" onclick="$(\'#rate-input\').click()"><div class="upload-zone-icon"><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20 26V8m0 0l-6 6m6-6l6 6"/><path d="M4 28l1.3 5.2A2 2 0 007.2 35h25.6a2 2 0 001.9-1.8L36 28"/></svg></div><div class="upload-zone-label">Drop rate card file here or click to browse</div><div class="upload-zone-hint">Columns: country &middot; <strong>partner</strong> &middot; carrier &middot; service &middot; Zone &middot; LBS &middot; Unit &middot; Rate &middot; Start date &middot; End date</div></div><input type="file" id="rate-input" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleRateFile(event)"/><div style="margin-top:10px;display:flex;gap:12px;flex-wrap:wrap;align-items:center"><span style="font-size:12px;color:'+(state.rateCards.length>0?'var(--teal)':'var(--text3)')+'">'+statsLine+'</span>'+(state.rateCards.length>0?'<button class="btn btn-sm btn-danger" style="font-size:11px" onclick="state.rateCards=[];saveRateCards();renderRates()">Clear All Dated Rates</button>':'')+'</div>'
+        :'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(155px,1fr));gap:10px;margin-bottom:12px"><div class="form-group" style="margin:0"><label class="lbl">Carrier / Service</label><select class="inp" id="mr-svc">'+svcOpts+'</select></div><div class="form-group" style="margin:0"><label class="lbl">Partner / Aggregator</label><input class="inp" id="mr-partner" placeholder="e.g. Shipbae"/></div><div class="form-group" style="margin:0"><label class="lbl">Country</label><input class="inp" id="mr-country" placeholder="e.g. US" value="US"/></div><div class="form-group" style="margin:0"><label class="lbl">Zone</label><select class="inp" id="mr-zone">'+manualZoneOpts+'</select></div><div class="form-group" style="margin:0"><label class="lbl">Weight</label><input class="inp" id="mr-wt" type="number" placeholder="e.g. 5" min="0.01" step="0.01"/></div><div class="form-group" style="margin:0"><label class="lbl">Unit</label><select class="inp" id="mr-unit"><option value="LBS">LBS</option><option value="OZ">OZ</option></select></div><div class="form-group" style="margin:0"><label class="lbl">Rate (USD)</label><input class="inp" id="mr-rate" type="number" placeholder="e.g. 6.57" step="0.01"/></div><div class="form-group" style="margin:0"><label class="lbl">Start Date</label><input class="inp" id="mr-start" type="date"/></div><div class="form-group" style="margin:0"><label class="lbl">End Date</label><input class="inp" id="mr-end" type="date"/></div></div><button class="btn btn-primary" onclick="addRateManual()">Add Rate</button><div style="margin-top:8px;font-size:12px;color:var(--text2)">With partner + dates &rarr; dated rate card. Without &rarr; base rate.</div>'
+      )+'</div>'
+    :'<div class="card" style="background:var(--surface2);border-style:dashed;text-align:center;padding:18px;margin-bottom:16px"><span style="font-size:13px;color:var(--text2)">Rate card upload is restricted to Admins</span></div>';
+
+  const tableSection='<div style="overflow-x:auto;max-height:520px"><table><thead><tr><th>Weight</th><th>Unit</th><th>Country</th><th>Partner</th><th>Rate (USD)</th><th>Valid From</th><th>Valid To</th><th>Status</th></tr></thead><tbody>'+tableBody+'</tbody></table></div><div style="margin-top:8px;font-size:12px;color:var(--text2)">'+tableRows.length+' entries &nbsp;&middot;&nbsp; Zone '+zone+' &nbsp;&middot;&nbsp; '+svcLabel+'</div>';
+
+  const compareSection='<div style="margin-bottom:14px"><div style="font-size:12px;color:var(--text2);font-weight:500;margin-bottom:8px">Select Carriers to Compare:</div><div style="display:flex;flex-wrap:wrap;gap:8px">'+carrierPills+'</div></div>'
+    +(cmpKeys.length===0
+      ?'<div style="text-align:center;padding:40px;color:var(--text2)"><div style="font-size:14px;font-weight:500">No carriers selected</div><div style="font-size:12px;margin-top:6px">Toggle carriers above to start comparing.</div></div>'
+      :'<div style="overflow-x:auto"><table style="font-size:12px;width:100%;border-collapse:collapse;white-space:nowrap"><thead>'+compareHdr+'</thead><tbody>'+compareBody+'</tbody></table></div><div style="margin-top:10px;font-size:12px;color:var(--text2)">Comparing <strong>'+cmpKeys.length+'</strong> carrier'+(cmpKeys.length!==1?'s':'')+' &nbsp;&middot;&nbsp; Zone '+zone+' &nbsp;&middot;&nbsp; as of '+viewDate+' &nbsp;&middot;&nbsp; <span style="color:var(--teal);font-weight:500">Teal = cheapest per row</span> &nbsp;<span style="color:var(--red)">+% = premium above cheapest</span></div>'
+    );
 
   el.innerHTML=`
     <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center">
       <h2 style="font-size:18px;font-weight:600;flex:1">Rate Cards</h2>
       <button class="btn btn-sm" onclick="downloadTemplate('rates')">${DL_ICON} Download Template</button>
     </div>
-
-    ${admin?`
-    <div class="card" style="margin-bottom:16px">
-      <div class="tab-pills" style="margin-bottom:14px">
-        <button class="tab-pill${rateMode==='upload'?' active':''}" onclick="window._rateMode='upload';renderRates()">Bulk Upload</button>
-        <button class="tab-pill${rateMode==='manual'?' active':''}" onclick="window._rateMode='manual';renderRates()">Manual Add</button>
-      </div>
-      ${rateMode==='upload'?`
-      <div class="upload-zone" onclick="$('#rate-input').click()">
-        <div class="upload-zone-icon"><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20 26V8m0 0l-6 6m6-6l6 6"/><path d="M4 28l1.3 5.2A2 2 0 007.2 35h25.6a2 2 0 001.9-1.8L36 28"/></svg></div>
-        <div class="upload-zone-label">Drop rate card file here or click to browse</div>
-        <div class="upload-zone-hint">Columns: country · <strong>partner</strong> · carrier · service · Zone · LBS · Unit · Rate · Start date · End date</div>
-      </div>
-      <input type="file" id="rate-input" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleRateFile(event)"/>
-      <div style="margin-top:10px;display:flex;gap:12px;flex-wrap:wrap;align-items:center">
-        <span style="font-size:12px;color:${state.rateCards.length>0?'var(--teal)':'var(--text3)'}">${statsLine}</span>
-        ${state.rateCards.length>0?`<button class="btn btn-sm btn-danger" style="font-size:11px" onclick="state.rateCards=[];saveRateCards();renderRates()">Clear All Dated Rates</button>`:''}
-      </div>`:`
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(155px,1fr));gap:10px;margin-bottom:12px">
-        <div class="form-group" style="margin:0"><label class="lbl">Service</label>
-          <select class="inp" id="mr-svc">${CARRIERS.map(c=>`<option value="${c.key}">${c.label}</option>`).join('')}</select>
-        </div>
-        <div class="form-group" style="margin:0"><label class="lbl">Partner / Aggregator</label>
-          <input class="inp" id="mr-partner" placeholder="e.g. Shipbae"/>
-        </div>
-        <div class="form-group" style="margin:0"><label class="lbl">Zone</label>
-          <select class="inp" id="mr-zone">${[1,2,3,4,5,6,7,8].map(z=>`<option value="${z}">Zone ${z}</option>`).join('')}</select>
-        </div>
-        <div class="form-group" style="margin:0"><label class="lbl">Weight</label>
-          <input class="inp" id="mr-wt" type="number" placeholder="e.g. 5" min="0.01" step="0.01"/>
-        </div>
-        <div class="form-group" style="margin:0"><label class="lbl">Unit</label>
-          <select class="inp" id="mr-unit"><option value="LBS">LBS</option><option value="OZ">OZ</option></select>
-        </div>
-        <div class="form-group" style="margin:0"><label class="lbl">Rate (USD)</label>
-          <input class="inp" id="mr-rate" type="number" placeholder="e.g. 6.57" step="0.01"/>
-        </div>
-        <div class="form-group" style="margin:0"><label class="lbl">Start Date <span style="font-weight:400;color:var(--text3)">(opt)</span></label>
-          <input class="inp" id="mr-start" type="date"/>
-        </div>
-        <div class="form-group" style="margin:0"><label class="lbl">End Date <span style="font-weight:400;color:var(--text3)">(opt)</span></label>
-          <input class="inp" id="mr-end" type="date"/>
-        </div>
-      </div>
-      <button class="btn btn-primary" onclick="addRateManual()">Add Rate</button>
-      <div style="margin-top:8px;font-size:12px;color:var(--text2)">With partner + dates → goes into dated rate card (appears in Compare view). Without partner/dates → base rate (always active).</div>`}
-    </div>`:`
-    <div class="card" style="background:var(--surface2);border-style:dashed;text-align:center;padding:18px;margin-bottom:16px">
-      <span style="font-size:13px;color:var(--text2)">Rate card upload is restricted to Admins</span>
-    </div>`}
-
+    ${uploadSection}
     <div class="card">
-      <!-- Filters + view toggle -->
-      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:16px;padding-bottom:14px;border-bottom:1px solid var(--border)">
-        <div class="form-group" style="margin:0"><label class="lbl">Service</label>
-          <select class="inp" style="width:200px" onchange="window._rateFilter=this.value;renderRates()">
-            ${CARRIERS.map(c=>`<option value="${c.key}"${c.key===svc?' selected':''}>${c.label}</option>`).join('')}
-          </select>
-        </div>
-        <div class="form-group" style="margin:0"><label class="lbl">Zone</label>
-          <select class="inp" style="width:90px" onchange="window._rateZone=this.value;renderRates()">
-            ${zones.map(z=>`<option value="${z}"${z===zone?' selected':''}>Zone ${z}</option>`).join('')}
-          </select>
-        </div>
-        <div class="form-group" style="margin:0"><label class="lbl">DWS Date</label>
-          <input class="inp" type="date" style="width:148px" value="${viewDate}" onchange="window._rateViewDate=this.value;renderRates()"/>
-        </div>
-        <div class="form-group" style="margin:0"><label class="lbl">Unit</label>
-          <select class="inp" style="width:82px" onchange="window._rateUnit=this.value;renderRates()">
-            <option value="ALL"${unitFilter==='ALL'?' selected':''}>All</option>
-            <option value="LBS"${unitFilter==='LBS'?' selected':''}>LBS</option>
-            <option value="OZ"${unitFilter==='OZ'?' selected':''}>OZ</option>
-          </select>
-        </div>
-        <div style="margin-left:auto;display:flex;align-items:flex-end">
-          <div class="tab-pills">
-            <button class="tab-pill${rateView==='table'?' active':''}" onclick="window._rateView='table';renderRates()">Rate Table</button>
-            <button class="tab-pill${rateView==='compare'?' active':''}" onclick="window._rateView='compare';renderRates()">Compare Partners</button>
-          </div>
-        </div>
-      </div>
-
-      ${rateView==='table'?`
-      <!-- Rate Table -->
-      <div style="max-height:520px;overflow-y:auto">
-        <table>
-          <thead>
-            <tr>
-              <th>Weight</th><th>Unit</th><th>Partner</th>
-              <th>Rate (USD)</th><th>Valid From</th><th>Valid To</th><th>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${tableRows.map((r,i)=>'<tr style="'+(i%2?'background:var(--surface2)':'')+(r.src==='dated'&&r.active?';border-left:3px solid var(--teal)':'')+'">'
-              +'<td class="mono">'+r.w+'</td>'
-              +'<td>'+badge(r.u==='OZ'?'badge-orange':'badge-blue',r.u)+'</td>'
-              +'<td style="font-size:12px;font-weight:600;color:var(--text2)">'+r.partner+'</td>'
-              +'<td class="mono" style="font-weight:700">$'+r.r.toFixed(2)+'</td>'
-              +'<td class="mono" style="font-size:11px;color:var(--text2)">'+(r.sd||'—')+'</td>'
-              +'<td class="mono" style="font-size:11px;color:var(--text2)">'+(r.ed||'—')+'</td>'
-              +'<td>'+(r.src==='base'?badge('badge-gray','Base'):r.active?badge('badge-blue','Active'):badge('badge-red','Inactive'))+'</td>'
-              +'</tr>').join('')}
-          </tbody>
-        </table>
-      </div>
-      <div style="margin-top:8px;font-size:12px;color:var(--text2)">${tableRows.length} entries · Zone ${zone} · ${svcLabel}</div>`:`
-
-      <!-- Compare Partners -->
-      ${partners.length===0?`
-      <div style="text-align:center;padding:40px 20px;color:var(--text2)">
-        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin:0 auto 12px;display:block;opacity:.4"><path d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
-        <div style="font-size:14px;margin-bottom:6px;font-weight:500">No partner data to compare</div>
-        <div style="font-size:12px">Upload rate cards with a <strong>partner</strong> column (e.g. Shipbae, Aggregator2) to see side-by-side comparison.</div>
-      </div>`:`
-      <div style="overflow-x:auto">
-        <table style="font-size:12px;width:100%;border-collapse:collapse;white-space:nowrap">
-          <thead>
-            <tr style="background:var(--surface2)">
-              <th style="padding:9px 12px;text-align:left;font-size:11px;color:var(--text2)">Weight</th>
-              <th style="padding:9px 8px;text-align:left;font-size:11px;color:var(--text2)">Unit</th>
-              ${partners.map(p=>'<th style="padding:9px 14px;text-align:right;font-size:11px;color:var(--text);font-weight:600">'+p+'</th>').join('')}
-              <th style="padding:9px 14px;text-align:right;font-size:11px;color:var(--text2);font-style:italic">Base</th>
-              <th style="padding:9px 12px;text-align:left;font-size:11px;color:var(--teal);font-weight:600">Cheapest</th>
-            </tr>
-          </thead>
-          <tbody>${compareBody}</tbody>
-        </table>
-      </div>
-      <div style="margin-top:10px;font-size:12px;color:var(--text2)">
-        Comparing <strong>${partners.length}</strong> partner${partners.length!==1?'s':''} · Zone ${zone} · ${svcLabel} · as of ${viewDate} &nbsp;·&nbsp;
-        <span style="color:var(--teal);font-weight:500">Teal bold = cheapest per row</span> &nbsp;
-        <span style="color:var(--red)">+% = premium above cheapest</span>
-      </div>`}
-      `}
+      ${filterBar}
+      ${rateView==='table'?tableSection:compareSection}
     </div>
   `;
 }
