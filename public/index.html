@@ -247,7 +247,7 @@ function saveUsers(u){localStorage.setItem('lm_users',JSON.stringify(u));}
 function isAdmin(){return state.currentUser?.role==='admin';}
 
 function initSession(){
-  loadSavedRules();loadSavedSurchargeData();loadSavedCarriers();loadSavedRateCards();loadSavedServiceKeys();
+  loadSavedRules();loadSavedSurchargeData();loadSavedCarriers();loadSavedRateCards();loadSavedServiceKeys();loadSavedZoneMap();loadSavedRateData();
   const saved=JSON.parse(localStorage.getItem('lm_session')||'null');
   if(saved){state.currentUser=saved;applyRole();return;}
   const users=loadUsers();
@@ -331,6 +331,10 @@ function parseISODate(val){
 }
 function saveRateCards(){try{localStorage.setItem('lm_ratecards',JSON.stringify(state.rateCards));}catch(e){show('Rate card data too large for storage','error');}}
 function loadSavedRateCards(){try{const s=localStorage.getItem('lm_ratecards');if(s)state.rateCards=JSON.parse(s);}catch(e){}}
+function saveZoneMap(){try{localStorage.setItem('lm_zonemap',JSON.stringify(state.zoneMap));}catch(e){show('Zone map too large for browser storage','error');}}
+function loadSavedZoneMap(){try{const s=localStorage.getItem('lm_zonemap');if(s)state.zoneMap=JSON.parse(s);}catch(e){}}
+function saveRateData(){try{localStorage.setItem('lm_ratedata',JSON.stringify(state.rateData));}catch(e){show('Rate data too large for browser storage','error');}}
+function loadSavedRateData(){try{const s=localStorage.getItem('lm_ratedata');if(s)state.rateData=JSON.parse(s);}catch(e){}}
 
 function saveSurchargeData(){
   try{
@@ -699,6 +703,7 @@ function addRateManual(){
     const tbl=unit==='OZ'?'oz':'lbs';
     if(!state.rateData[svc][tbl][zone])state.rateData[svc][tbl][zone]={};
     state.rateData[svc][tbl][zone][wt]=rate;
+    saveRateData();
     show(`Added base rate: ${CARRIERS.find(c=>c.key===svc)?.label} Zone ${zone} ${wt}${unit} $${rate.toFixed(2)}`);
   }
   document.getElementById('mr-wt').value='';document.getElementById('mr-rate').value='';
@@ -711,6 +716,7 @@ function addZoneManual(){
   if(!zip||zip==='00000'||!zone||zone<1||zone>8){show('Enter a valid ZIP code and zone (1–8)','error');return;}
   if(!state.zoneMap[carrier])state.zoneMap[carrier]={};
   state.zoneMap[carrier][zip]=zone;
+  saveZoneMap();
   document.getElementById('mz-zip').value='';
   show(`Zone added: ZIP ${zip} → Zone ${zone} (${carrier})`);
   renderZones();
@@ -1708,7 +1714,7 @@ async function handleRateFile(e){
         state.rateData[sk][tbl][z][w]=rate;nBase++;
       }
     });
-    saveRateCards();saveServiceKeys();saveRules();
+    saveRateCards();saveServiceKeys();saveRules();if(nBase>0)saveRateData();
     show(`Loaded: ${nDated} dated + ${nBase} base rate entries from ${f.name}`);renderRates();}
   catch(err){show('Failed to parse: '+err.message,'error');}
 }
@@ -1717,7 +1723,7 @@ async function handleZoneFile(e){
   const f=e.target.files[0];if(!f)return;
   try{const buf=await f.arrayBuffer();const rows=parseXlsx(new Uint8Array(buf),'zone');let n=0;
     rows.forEach(r=>{const carrier=String(r.carrier||r.Carrier||'').toLowerCase();const src=String(r.source||r.Source||'JFK').toUpperCase();const dest=String(r.destination||r.Destination||'').padStart(5,'0');const zone=parseInt(r.value||r.Value||r.Zone||r.zone||0);if(!dest||!zone)return;const key=carrier.includes('uni')?'uniuni':'usps';if(!state.zoneMap[key])state.zoneMap[key]={};if(src==='JFK'||!state.zoneMap[key][dest])state.zoneMap[key][dest]=zone;n++;});
-    show(`Loaded ${n} zone entries from ${f.name}`);renderZones();}
+    saveZoneMap();show(`Loaded ${n} zone entries from ${f.name}`);renderZones();}
   catch(err){show('Failed to parse: '+err.message,'error');}
 }
 
