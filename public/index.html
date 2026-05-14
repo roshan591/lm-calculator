@@ -827,12 +827,8 @@ function renderCalculator(){
   const PAGE=200;
 
   // Pre-build combo selector card
-  const comboPills=availCombos.map(combo=>{
-    const cl=CARRIERS.find(c=>c.key===combo.key);
-    const on=selCombos.some(s=>mkComboId(s)===mkComboId(combo));
-    return'<button onclick="toggleCalcCombo(\''+mkComboId(combo)+'\')" style="display:inline-flex;align-items:center;gap:5px;padding:5px 13px;border-radius:20px;border:1.5px solid '+(on?(cl?.color||'var(--accent)'):'var(--border)')+';background:'+(on?(cl?.color||'#888')+'1a':'transparent')+';cursor:pointer;font-size:12px;font-weight:'+(on?'600':'400')+';color:'+(on?(cl?.color||'var(--accent)'):'var(--text2)')+'"><span style="width:7px;height:7px;border-radius:50%;background:'+(on?(cl?.color||'#888'):'var(--border)')+';flex-shrink:0;display:inline-block"></span>'+mkComboLabel(combo,false)+'</button>';
-  }).join('');
-  const comboSelectorHtml='<div class="card" style="margin-bottom:16px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><span style="font-size:13px;font-weight:600;color:var(--text)">Carriers to Calculate</span><span style="font-size:12px;color:var(--text2)">'+selCombos.length+' / '+availCombos.length+' selected</span>'+(window._calcCombos&&window._calcCombos.length<availCombos.length?'<button class="btn btn-sm" style="margin-left:auto;font-size:11px" onclick="window._calcCombos=null;renderCalculator()">Select All</button>':'')+'</div><div style="display:flex;flex-wrap:wrap;gap:8px">'+comboPills+'</div>'+(selCombos.length===0?'<div style="margin-top:8px;font-size:12px;color:var(--red)">Select at least one carrier to calculate costs.</div>':'')+'</div>';
+  const calcSelIds=window._calcCombos?window._calcCombos.filter(id=>availCombos.some(c=>mkComboId(c)===id)):availCombos.map(mkComboId);
+  const comboSelectorHtml='<div class="card" style="margin-bottom:16px"><div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><span style="font-size:13px;font-weight:600;color:var(--text)">Carriers to Calculate</span>'+comboDropdownHtml('calc',availCombos,calcSelIds)+(selCombos.length===0?'<span style="font-size:12px;color:var(--red)">Select at least one carrier.</span>':'')+'</div></div>';
 
   // Pre-build combo table header cells
   const comboHeaderCells=selCombos.map(combo=>{const cl=CARRIERS.find(c=>c.key===combo.key);return'<th style="color:'+(cl?.color||'var(--text)')+'">'+mkComboLabel(combo,true)+'</th>';}).join('');
@@ -937,13 +933,68 @@ function renderCalculator(){
   `;
 }
 
-function toggleCmpCombo(id){
+function toggleCmpCombo(id){toggleCmb('rates',id,!((window._cmpCombos||getAvailCombos().map(mkComboId)).includes(id)));}
+
+// ─── SHARED COMBO DROPDOWN ───
+function comboDropdownHtml(prefix,allCombos,selIds){
+  const ds=(window._ddState||{})[prefix]||{open:false,search:''};
+  if(window._ddState)delete window._ddState[prefix];
+  const selCount=selIds.filter(id=>allCombos.some(c=>mkComboId(c)===id)).length;
+  const items=allCombos.map(combo=>{
+    const on=selIds.includes(mkComboId(combo));
+    const cl=CARRIERS.find(c=>c.key===combo.key);
+    const sk=getServiceKeyInfo(combo.key);
+    const color=cl?.color||sk?.color||'#6b7280';
+    const lbl=mkComboLabel(combo,false);
+    return'<label class="combo-item-'+prefix+'" data-s="'+lbl.toLowerCase().replace(/['"]/g,'')+'" style="display:flex;align-items:center;gap:8px;padding:7px 12px;cursor:pointer;font-size:12px;user-select:none"><input type="checkbox" '+(on?'checked':'')+' onchange="toggleCmb(\''+prefix+'\',\''+mkComboId(combo)+'\',this.checked)" style="cursor:pointer;flex-shrink:0"/><span style="width:8px;height:8px;border-radius:50%;background:'+color+';flex-shrink:0;display:inline-block"></span><span>'+lbl+'</span></label>';
+  }).join('');
+  return'<div style="position:relative;display:inline-block" id="combo-dd-'+prefix+'">'
+    +'<div onclick="toggleComboDD(\''+prefix+'\')" style="cursor:pointer;border:1px solid var(--border);border-radius:6px;padding:6px 12px;background:var(--bg);display:inline-flex;align-items:center;gap:8px;min-width:190px;user-select:none">'
+      +'<span style="flex:1;font-size:13px;color:var(--text)"><strong>'+selCount+'</strong><span style="color:var(--text2)"> / '+allCombos.length+' selected</span></span>'
+      +'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="color:var(--text2);flex-shrink:0"><polyline points="6 9 12 15 18 9"/></svg>'
+    +'</div>'
+    +'<div id="combo-dd-panel-'+prefix+'" onclick="event.stopPropagation()" style="display:'+(ds.open?'flex':'none')+';position:absolute;top:calc(100% + 4px);left:0;z-index:200;background:var(--surface);border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,.15);width:280px;flex-direction:column">'
+      +'<div style="padding:8px;border-bottom:1px solid var(--border)">'
+        +'<input class="inp" id="combo-search-'+prefix+'" placeholder="Search combinations..." value="'+(ds.search||'')+'" style="font-size:12px;padding:5px 8px;width:100%;box-sizing:border-box" oninput="filterComboDD(\''+prefix+'\')" onclick="event.stopPropagation()"/>'
+      +'</div>'
+      +'<div style="padding:5px 8px;border-bottom:1px solid var(--border);display:flex;gap:6px;align-items:center">'
+        +'<button class="btn btn-sm" style="font-size:11px" onclick="event.stopPropagation();selectAllCombos(\''+prefix+'\',true)">All</button>'
+        +'<button class="btn btn-sm" style="font-size:11px" onclick="event.stopPropagation();selectAllCombos(\''+prefix+'\',false)">None</button>'
+        +'<span style="margin-left:auto;font-size:11px;color:var(--text2)">'+selCount+' selected</span>'
+      +'</div>'
+      +'<div id="combo-dd-list-'+prefix+'" style="overflow-y:auto;max-height:240px">'+items+'</div>'
+    +'</div>'
+    +'</div>';
+}
+function toggleComboDD(prefix){
+  document.querySelectorAll('[id^="combo-dd-panel-"]').forEach(p=>{if(p.id!=='combo-dd-panel-'+prefix)p.style.display='none';});
+  const panel=document.getElementById('combo-dd-panel-'+prefix);if(!panel)return;
+  const isOpen=panel.style.display!=='none';
+  panel.style.display=isOpen?'none':'flex';
+  if(!isOpen)setTimeout(()=>document.getElementById('combo-search-'+prefix)?.focus(),50);
+}
+function filterComboDD(prefix){
+  const q=(document.getElementById('combo-search-'+prefix)?.value||'').toLowerCase();
+  document.querySelectorAll('.combo-item-'+prefix).forEach(el=>{el.style.display=!q||el.dataset.s.includes(q)?'':'none';});
+}
+function toggleCmb(prefix,id,checked){
+  const k=prefix==='rates'?'_cmpCombos':'_calcCombos';
   const avail=getAvailCombos();
-  if(!window._cmpCombos)window._cmpCombos=avail.map(mkComboId);
-  const idx=window._cmpCombos.indexOf(id);
-  if(idx>=0){if(window._cmpCombos.length>1)window._cmpCombos.splice(idx,1);}
-  else window._cmpCombos.push(id);
-  renderRates();
+  if(!window[k])window[k]=avail.map(mkComboId);
+  const arr=window[k];
+  if(checked){if(!arr.includes(id))arr.push(id);}
+  else{const idx=arr.indexOf(id);if(idx>=0&&arr.length>1)arr.splice(idx,1);}
+  if(!window._ddState)window._ddState={};
+  window._ddState[prefix]={open:true,search:document.getElementById('combo-search-'+prefix)?.value||''};
+  if(prefix==='rates')renderRates();else renderCalculator();
+}
+function selectAllCombos(prefix,all){
+  const avail=getAvailCombos();
+  const k=prefix==='rates'?'_cmpCombos':'_calcCombos';
+  window[k]=all?avail.map(mkComboId):(avail.length?[mkComboId(avail[0])]:[]);
+  if(!window._ddState)window._ddState={};
+  window._ddState[prefix]={open:true,search:document.getElementById('combo-search-'+prefix)?.value||''};
+  if(prefix==='rates')renderRates();else renderCalculator();
 }
 
 function renderRates(){
@@ -975,14 +1026,7 @@ function renderRates(){
   const svcOpts=CARRIERS.map(c=>'<option value="'+c.key+'">'+c.label+'</option>').join('');
   const manualZoneOpts=[1,2,3,4,5,6,7,8].map(z=>'<option value="'+z+'"'+(z===8?' selected':'')+'>Zone '+z+'</option>').join('');
 
-  // Combo picker pills
-  const comboPills=availCombos.map(combo=>{
-    const cl=CARRIERS.find(c=>c.key===combo.key);
-    const sk=getServiceKeyInfo(combo.key);
-    const color=cl?.color||sk?.color||'#6b7280';
-    const on=selIds.includes(mkComboId(combo));
-    return'<button onclick="toggleCmpCombo(\''+mkComboId(combo)+'\')" style="display:inline-flex;align-items:center;gap:5px;padding:5px 13px;border-radius:20px;border:1.5px solid '+(on?color:'var(--border)')+';background:'+(on?color+'1a':'transparent')+';cursor:pointer;font-size:12px;font-weight:'+(on?'600':'400')+';color:'+(on?color:'var(--text2)')+'"><span style="width:7px;height:7px;border-radius:50%;background:'+(on?color:'var(--border)')+';flex-shrink:0;display:inline-block"></span>'+mkComboLabel(combo,false)+'</button>';
-  }).join('');
+  // Combo picker dropdown
 
   // Collect weight+unit breakpoints for selected zone across selected combos
   const wuSet=new Set();
@@ -1060,7 +1104,7 @@ function renderRates(){
         <div class="form-group" style="margin:0"><label class="lbl">Unit</label><select class="inp" style="width:80px" onchange="window._rateUnit=this.value;renderRates()"><option value="ALL"${unitFilter==='ALL'?' selected':''}>All</option><option value="LBS"${unitFilter==='LBS'?' selected':''}>LBS</option><option value="OZ"${unitFilter==='OZ'?' selected':''}>OZ</option></select></div>
         <div class="form-group" style="margin:0"><label class="lbl">DWS Date</label><input class="inp" type="date" style="width:148px" value="${viewDate}" onchange="window._rateViewDate=this.value;renderRates()"/></div>
       </div>
-      ${availCombos.length>0?`<div style="margin-bottom:14px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span style="font-size:12px;font-weight:600;color:var(--text2)">Partner &middot; Carrier</span><span style="font-size:11px;color:var(--text3)">${selCombos.length} / ${availCombos.length} selected</span>${selIds.length<availCombos.length?'<button class="btn btn-sm" style="font-size:11px;margin-left:auto" onclick="window._cmpCombos=null;renderRates()">Select All</button>':''}</div><div style="display:flex;flex-wrap:wrap;gap:8px">${comboPills}</div></div>`:''}
+      ${availCombos.length>0?`<div style="margin-bottom:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap"><span style="font-size:12px;font-weight:600;color:var(--text2)">Partner &middot; Carrier</span>${comboDropdownHtml('rates',availCombos,selIds)}</div>`:''}
       ${tableContent}
     </div>
   `;
@@ -1758,6 +1802,7 @@ function runCalcUI(){
 // ═══════════════════════════════════════════════════
 // INIT
 // ═══════════════════════════════════════════════════
+document.addEventListener('click',function(e){if(!e.target.closest('[id^="combo-dd-"]'))document.querySelectorAll('[id^="combo-dd-panel-"]').forEach(p=>p.style.display='none');});
 initSession();
 renderCalculator();
 </script>
