@@ -1166,89 +1166,52 @@ function renderRules(){
       ${admin?`<span class="badge badge-blue" style="font-size:11px">Editing enabled</span>`:'<span class="badge badge-gray" style="font-size:11px">View only</span>'}
       <button class="btn btn-sm" onclick="downloadTemplate('rules')">${DL_ICON} Download Reference</button>
     </div>
-    ${CARRIERS.map(c=>{const r=R[c.key];return`
-    <div class="card">
-      <div class="rules-carrier-header" style="margin-bottom:12px">
-        <div class="carrier-dot" style="background:${c.color}"></div>
-        <span style="font-weight:600;font-size:15px">${c.label}</span>
-        ${admin?`<button class="btn btn-sm btn-danger" style="margin-left:auto;font-size:11px" onclick="resetCarrierRules('${c.key}')">Reset Defaults</button>${c.custom?`<button class="btn btn-sm btn-danger" style="margin-left:4px;font-size:11px" onclick="removeCustomCarrier('${c.key}')">Remove</button>`:''}`:''}
-      </div>
-      <table style="width:100%;border-collapse:collapse">
-        <colgroup><col style="width:40%"/><col/></colgroup>
-        <tbody>
-          ${rw('Vol Factor',ni(c.key,'volFactor',r.volFactor,'cu.in per lb'),false)}
-          ${r.volThreshold!==undefined?rw('Vol Threshold',ni(c.key,'volThreshold',r.volThreshold,'cu.in (0 = always apply)'),true):''}
-          ${rw('Max Weight',ni(c.key,'maxWeight',r.maxWeight,'lbs'),r.volThreshold===undefined)}
-          ${r.maxLongestInch!==undefined?rw('Max Longest Side',ni(c.key,'maxLongestInch',r.maxLongestInch,'inches'),true):''}
-          ${r.maxCubicIn!==undefined?rw('Max Volume',ni(c.key,'maxCubicIn',r.maxCubicIn,'cu.in'),false):''}
-          ${r.oversize?`
-            ${rw('Oversize L1',ni(c.key,'oversize.L1.t',r.oversize.L1.t,'cm →')+' +$'+ni(c.key,'oversize.L1.c',r.oversize.L1.c,''),true)}
-            ${rw('Oversize L2',ni(c.key,'oversize.L2.t',r.oversize.L2.t,'cm →')+' +$'+ni(c.key,'oversize.L2.c',r.oversize.L2.c,''),false)}
-            ${rw('Oversize L3',ni(c.key,'oversize.L3.t',r.oversize.L3.t,'cm →')+' +$'+ni(c.key,'oversize.L3.c',r.oversize.L3.c,''),true)}
-          `:''}
-          ${r.overlength?`
-            ${rw('Overlength (lower–upper)',ni(c.key,'overlength.t',r.overlength.t,'cm')+'–'+ni(c.key,'overlength.limit',r.overlength.limit,'cm →')+' +$'+ni(c.key,'overlength.c',r.overlength.c,''),false)}
-            ${rw('Overlength >upper charge','+$'+ni(c.key,'overlength.lc',r.overlength.lc,''),true)}
-          `:''}
-          ${r.overvolume?rw('Overvolume','>'+ni(c.key,'overvolume.t',r.overvolume.t,'cu.in →')+' +$'+ni(c.key,'overvolume.c',r.overvolume.c,''),false):''}
-          ${r.rsc?rw('Residential Surcharge','+$'+ni(c.key,'rsc.c',r.rsc.c,'if gross < 10 kg'),true):''}
-          ${r.overweight?rw('Overweight Threshold','>'+ni(c.key,'overweight.t',r.overweight.t,'lbs — region-based charge'),false):''}
-          ${r.fuelSurcharge!==undefined?rw('Fuel Surcharge',ni(c.key,'fuelSurcharge',r.fuelSurcharge,'(decimal — 0.1803 = 18.03%)'),true):''}
-          ${rw('Marketplaces',admin?`<input class="inp" type="text" style="width:100%;padding:4px 7px;font-size:12px" value="${(r.marketplaces||[]).join(', ')}" onchange="setMarketplaces('${c.key}',this.value)" placeholder="Comma-separated"/>`:`<span style="font-size:12px">${(r.marketplaces||[]).join(', ')}</span>`,false)}
-          ${rw('PO Box',admin?`<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px"><input type="checkbox" ${r.poAddress?'checked':''} onchange="setPoAddress('${c.key}',this.checked)"/> ${r.poAddress?'Accepted':'Not accepted'}</label>`:`<span class="mono" style="font-size:12px">${r.poAddress?'Yes':'No'}</span>`,true)}
-        </tbody>
-      </table>
-    </div>`}).join('')}
-    ${admin?`
-    <div class="card" style="margin-bottom:16px;border-style:dashed">
-      <div style="font-size:14px;font-weight:600;margin-bottom:14px">Add New Carrier</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 100px 1fr auto;gap:12px;align-items:flex-end;flex-wrap:wrap">
-        <div class="form-group" style="margin:0"><label class="lbl">Carrier Key (e.g. FEDEX)</label>
-          <input class="inp" id="nc-key" placeholder="FEDEX" style="text-transform:uppercase" oninput="this.value=this.value.toUpperCase().replace(/[^A-Z0-9_]/g,'')"/>
-        </div>
-        <div class="form-group" style="margin:0"><label class="lbl">Display Name</label>
-          <input class="inp" id="nc-label" placeholder="e.g. FedEx Ground"/>
-        </div>
-        <div class="form-group" style="margin:0"><label class="lbl">Color</label>
-          <input class="inp" id="nc-color" type="color" value="#6b7280" style="height:36px;padding:2px 4px;cursor:pointer"/>
-        </div>
-        <div class="form-group" style="margin:0"><label class="lbl">Carrier Type</label>
-          <select class="inp" id="nc-type">
-            <option value="UPS" selected>UPS-type (zone surcharges + fuel %)</option>
-            <option value="USPS">USPS-type (oversize / overlength rules)</option>
-            <option value="UNIUNI">UniUni-type (ZIP coverage required)</option>
-          </select>
-        </div>
-        <button class="btn btn-primary" onclick="addCarrier(document.getElementById('nc-key').value,document.getElementById('nc-label').value,document.getElementById('nc-color').value,document.getElementById('nc-type').value)">Add Carrier</button>
-      </div>
-      <div style="margin-top:10px;font-size:12px;color:var(--text2)">
-        The carrier type determines which calculation rules apply. UPS-type uses zone-based surcharges and fuel %. USPS-type applies oversize/overlength/overvolume fees. UniUni-type always applies volumetric weight and requires a ZIP zone file.
-      </div>
-    </div>
-    `:''}
 
-    ${state.serviceKeys.length>0?`
-    <div style="font-size:13px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin:8px 0 12px">Service Keys</div>
+    ${state.serviceKeys.length===0?`
+    <div class="card" style="text-align:center;padding:40px 24px">
+      <div style="font-size:15px;font-weight:600;color:var(--text2);margin-bottom:8px">No service keys configured yet</div>
+      <div style="font-size:13px;color:var(--text3)">Add a service key below to configure rules, then link directly to Rate Cards and Zone Mapping for that key.</div>
+    </div>`:''}
+
     ${state.serviceKeys.map(sk=>{const r=state.rules[sk.key]||state.rules[sk.baseCarrier]||{};return`
     <div class="card">
       <div class="rules-carrier-header" style="margin-bottom:12px">
         <div class="carrier-dot" style="background:${sk.color}"></div>
         <span style="font-weight:600;font-size:15px">${sk.label}</span>
         <span style="font-size:11px;color:var(--text2);margin-left:6px;font-family:monospace">${sk.key}</span>
-        <span class="badge" style="margin-left:8px;background:${sk.color}20;color:${sk.color};border:1px solid ${sk.color}40;font-size:10px">${sk.type}-type · base: ${sk.baseCarrier}</span>
-        ${admin?`<button class="btn btn-sm btn-danger" style="margin-left:auto;font-size:11px" onclick="removeServiceKey('${sk.key}')">Remove</button>`:''}
+        <span class="badge" style="margin-left:8px;background:${sk.color}20;color:${sk.color};border:1px solid ${sk.color}40;font-size:10px">${sk.type}-type</span>
+        <div style="margin-left:auto;display:flex;gap:6px;align-items:center">
+          <button class="btn btn-sm" style="font-size:11px" onclick="navTo('rates',()=>{window._cmpCombos=['${sk.key}||'];})">Rate Cards ↗</button>
+          <button class="btn btn-sm" style="font-size:11px" onclick="navTo('zones',()=>{window._zoneView='${sk.key.toLowerCase()}';})">Zone Mapping ↗</button>
+          ${admin?`<button class="btn btn-sm btn-danger" style="font-size:11px" onclick="removeServiceKey('${sk.key}')">Remove</button>`:''}
+        </div>
       </div>
       <table style="width:100%;border-collapse:collapse">
         <colgroup><col style="width:40%"/><col/></colgroup>
         <tbody>
           ${rw('Vol Factor',ni(sk.key,'volFactor',r.volFactor??166,'cu.in per lb'),false)}
-          ${r.volThreshold!==undefined?rw('Vol Threshold',ni(sk.key,'volThreshold',r.volThreshold,'cu.in'),true):''}
+          ${r.volThreshold!==undefined?rw('Vol Threshold',ni(sk.key,'volThreshold',r.volThreshold,'cu.in (0 = always apply)'),true):''}
           ${rw('Max Weight',ni(sk.key,'maxWeight',r.maxWeight??150,'lbs'),r.volThreshold===undefined)}
-          ${rw('Marketplaces',admin?`<input class="inp" type="text" style="width:100%;padding:4px 7px;font-size:12px" value="${(r.marketplaces||[]).join(', ')}" onchange="setMarketplaces('${sk.key}',this.value)" placeholder="Comma-separated"/>`:`<span style="font-size:12px">${(r.marketplaces||[]).join(', ')||'—'}</span>`,true)}
-          ${rw('PO Box',admin?`<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px"><input type="checkbox" ${r.poAddress?'checked':''} onchange="setPoAddress('${sk.key}',this.checked)"/> ${r.poAddress?'Accepted':'Not accepted'}</label>`:`<span class="mono" style="font-size:12px">${r.poAddress?'Yes':'No'}</span>`,false)}
+          ${r.maxLongestInch!==undefined?rw('Max Longest Side',ni(sk.key,'maxLongestInch',r.maxLongestInch,'inches'),true):''}
+          ${r.maxCubicIn!==undefined?rw('Max Volume',ni(sk.key,'maxCubicIn',r.maxCubicIn,'cu.in'),false):''}
+          ${r.oversize?`
+            ${rw('Oversize L1',ni(sk.key,'oversize.L1.t',r.oversize.L1.t,'cm →')+' +$'+ni(sk.key,'oversize.L1.c',r.oversize.L1.c,''),true)}
+            ${rw('Oversize L2',ni(sk.key,'oversize.L2.t',r.oversize.L2.t,'cm →')+' +$'+ni(sk.key,'oversize.L2.c',r.oversize.L2.c,''),false)}
+            ${rw('Oversize L3',ni(sk.key,'oversize.L3.t',r.oversize.L3.t,'cm →')+' +$'+ni(sk.key,'oversize.L3.c',r.oversize.L3.c,''),true)}
+          `:''}
+          ${r.overlength?`
+            ${rw('Overlength (lower–upper)',ni(sk.key,'overlength.t',r.overlength.t,'cm')+'–'+ni(sk.key,'overlength.limit',r.overlength.limit,'cm →')+' +$'+ni(sk.key,'overlength.c',r.overlength.c,''),false)}
+            ${rw('Overlength >upper charge','+$'+ni(sk.key,'overlength.lc',r.overlength.lc,''),true)}
+          `:''}
+          ${r.overvolume?rw('Overvolume','>'+ni(sk.key,'overvolume.t',r.overvolume.t,'cu.in →')+' +$'+ni(sk.key,'overvolume.c',r.overvolume.c,''),false):''}
+          ${r.rsc?rw('Residential Surcharge','+$'+ni(sk.key,'rsc.c',r.rsc.c,'if gross < 10 kg'),true):''}
+          ${r.overweight?rw('Overweight Threshold','>'+ni(sk.key,'overweight.t',r.overweight.t,'lbs — region-based charge'),false):''}
+          ${r.fuelSurcharge!==undefined?rw('Fuel Surcharge',ni(sk.key,'fuelSurcharge',r.fuelSurcharge,'(decimal — 0.1803 = 18.03%)'),true):''}
+          ${rw('Marketplaces',admin?`<input class="inp" type="text" style="width:100%;padding:4px 7px;font-size:12px" value="${(r.marketplaces||[]).join(', ')}" onchange="setMarketplaces('${sk.key}',this.value)" placeholder="Comma-separated"/>`:`<span style="font-size:12px">${(r.marketplaces||[]).join(', ')||'—'}</span>`,false)}
+          ${rw('PO Box',admin?`<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px"><input type="checkbox" ${r.poAddress?'checked':''} onchange="setPoAddress('${sk.key}',this.checked)"/> ${r.poAddress?'Accepted':'Not accepted'}</label>`:`<span class="mono" style="font-size:12px">${r.poAddress?'Yes':'No'}</span>`,true)}
         </tbody>
       </table>
-    </div>`}).join('')}`:''}
+    </div>`}).join('')}
 
     ${admin?`
     <div class="card" style="margin-bottom:16px;border-style:dashed;border-color:var(--teal)">
@@ -1309,15 +1272,10 @@ function renderRules(){
       </div>
       <div style="display:flex;gap:10px;align-items:center">
         <button class="btn btn-primary" style="background:var(--teal)" onclick="_addSKFromForm()">Add Service Key</button>
-        <span style="font-size:11px;color:var(--text2)">Blank rule fields inherit from the selected base carrier. Configure DAS & zone surcharges in the DAS tab using this key as the carrier name.</span>
+        <span style="font-size:11px;color:var(--text2)">After adding, use the Rate Cards ↗ and Zone Mapping ↗ buttons on the card to configure rates and zones for this key.</span>
       </div>
     </div>
     `:''}
-
-    <div class="card" style="background:var(--orange-bg);border-color:#fcd34d">
-      <div style="font-size:13px;color:var(--orange);font-weight:500">UPS-Type Region-Based Surcharges</div>
-      <div style="font-size:12px;color:var(--text2);margin-top:6px">For UPS-type carriers and service keys: Overweight, Overdimension, Large Package, DAS, and Packaging surcharges are configured in the <strong>DAS &amp; Regional Surcharges</strong> tab. Upload your REGION_RATE_LOOKUP file using the service key as the carrier column (e.g. <span class="mono">NYSFS-FEDEX-EXPRESS-SAVER</span>).</div>
-    </div>
   `;
 }
 
@@ -1733,6 +1691,11 @@ function switchTab(el,tab){
   $$('.tab-content').forEach(x=>x.style.display='none');
   $(`#tab-${tab}`).style.display='';
   ({calculator:renderCalculator,rates:renderRates,rules:renderRules,zones:renderZones,analysis:renderAnalysis,surcharges:renderSurcharges,network:renderNetwork})[tab]?.();
+}
+function navTo(tab,setupFn){
+  const navEl=document.querySelector('.nav-item[data-tab="'+tab+'"]');
+  if(setupFn)setupFn();
+  if(navEl)switchTab(navEl,tab);
 }
 
 function setMode(mode,btn){
