@@ -996,11 +996,48 @@ function selectAllCombos(prefix,all){
   window._ddState[prefix]={open:true,search:document.getElementById('combo-search-'+prefix)?.value||''};
   if(prefix==='rates')renderRates();else renderCalculator();
 }
+function zoneDropdownHtml(selZones){
+  const allZ=['1','2','3','4','5','6','7','8'];
+  const ds=(window._ddState||{})['zones']||{open:false};
+  if(window._ddState)delete window._ddState['zones'];
+  const selCount=selZones.length;
+  const items=allZ.map(z=>{
+    const on=selZones.includes(z);
+    return'<label style="display:flex;align-items:center;gap:8px;padding:7px 12px;cursor:pointer;font-size:12px;user-select:none"><input type="checkbox" '+(on?'checked':'')+' onchange="toggleRateZone(\''+z+'\',this.checked)" style="cursor:pointer"/><span>Zone '+z+'</span></label>';
+  }).join('');
+  return'<div style="position:relative;display:inline-block" id="combo-dd-zones">'
+    +'<div onclick="toggleComboDD(\'zones\')" style="cursor:pointer;border:1px solid var(--border);border-radius:6px;padding:6px 12px;background:var(--bg);display:inline-flex;align-items:center;gap:8px;min-width:150px;user-select:none">'
+      +'<span style="flex:1;font-size:13px;color:var(--text)"><strong>'+selCount+'</strong><span style="color:var(--text2)"> / 8 zones</span></span>'
+      +'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="color:var(--text2);flex-shrink:0"><polyline points="6 9 12 15 18 9"/></svg>'
+    +'</div>'
+    +'<div id="combo-dd-panel-zones" onclick="event.stopPropagation()" style="display:'+(ds.open?'flex':'none')+';position:absolute;top:calc(100% + 4px);left:0;z-index:200;background:var(--surface);border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,.15);width:160px;flex-direction:column">'
+      +'<div style="padding:5px 8px;border-bottom:1px solid var(--border);display:flex;gap:6px;align-items:center">'
+        +'<button class="btn btn-sm" style="font-size:11px" onclick="event.stopPropagation();selectAllZones(true)">All</button>'
+        +'<button class="btn btn-sm" style="font-size:11px" onclick="event.stopPropagation();selectAllZones(false)">None</button>'
+      +'</div>'
+      +'<div style="overflow-y:auto;max-height:240px">'+items+'</div>'
+    +'</div>'
+  +'</div>';
+}
+function toggleRateZone(z,checked){
+  if(!window._rateZones)window._rateZones=['1','2','3','4','5','6','7','8'];
+  if(checked){if(!window._rateZones.includes(z))window._rateZones.push(z);}
+  else{const idx=window._rateZones.indexOf(z);if(idx>=0&&window._rateZones.length>1)window._rateZones.splice(idx,1);}
+  if(!window._ddState)window._ddState={};
+  window._ddState['zones']={open:true};
+  renderRates();
+}
+function selectAllZones(all){
+  window._rateZones=all?['1','2','3','4','5','6','7','8']:['1'];
+  if(!window._ddState)window._ddState={};
+  window._ddState['zones']={open:true};
+  renderRates();
+}
 
 function renderRates(){
   const el=$('#tab-rates');
   const admin=isAdmin();
-  const zone=window._rateZone||'1';
+  const selZones=window._rateZones||['1','2','3','4','5','6','7','8'];
   const viewDate=window._rateViewDate||new Date().toISOString().slice(0,10);
   const unitFilter=window._rateUnit||'ALL';
   const countryFilter=window._rateCountry||'';
@@ -1022,40 +1059,43 @@ function renderRates(){
   // Filter options
   const allCountries=[...new Set(state.rateCards.map(r=>r.country).filter(Boolean))].sort();
   const countryOpts='<option value="">All Countries</option>'+allCountries.map(c=>'<option value="'+c+'"'+(c===countryFilter?' selected':'')+'>'+c+'</option>').join('');
-  const zoneOpts=[1,2,3,4,5,6,7,8].map(z=>'<option value="'+z+'"'+(String(z)===zone?' selected':'')+'>'+'Zone '+z+'</option>').join('');
   const svcOpts=CARRIERS.map(c=>'<option value="'+c.key+'">'+c.label+'</option>').join('');
   const manualZoneOpts=[1,2,3,4,5,6,7,8].map(z=>'<option value="'+z+'"'+(z===8?' selected':'')+'>Zone '+z+'</option>').join('');
 
   // Combo picker dropdown
 
-  // Collect weight+unit breakpoints for selected zone across selected combos
-  const wuSet=new Set();
-  selCombos.forEach(combo=>{
-    state.rateCards.filter(rc=>{
-      const km=rc.serviceKey?rc.serviceKey===combo.key:rc.key===combo.key;
-      const pm=!combo.partner||rc.partner===combo.partner;
-      const cm=!countryFilter||rc.country===countryFilter;
-      const dm=(!rc.startDate||rc.startDate<=viewDate)&&(!rc.endDate||rc.endDate>=viewDate);
-      return km&&pm&&cm&&String(rc.zone)===zone&&dm;
-    }).forEach(rc=>wuSet.add(rc.weight+'|'+rc.unit));
-    const td=state.rateData[combo.key];
-    if(td?.lbs?.[zone])Object.keys(td.lbs[zone]).forEach(w=>wuSet.add(w+'|LBS'));
-    if(td?.oz?.[zone])Object.keys(td.oz[zone]).forEach(w=>wuSet.add(w+'|OZ'));
+  // Collect rows: zone × weight+unit across selected combos
+  const allRows=[];
+  selZones.slice().sort((a,b)=>+a-+b).forEach(z=>{
+    const wuSetZ=new Set();
+    selCombos.forEach(combo=>{
+      state.rateCards.filter(rc=>{
+        const km=rc.serviceKey?rc.serviceKey===combo.key:rc.key===combo.key;
+        const pm=!combo.partner||rc.partner===combo.partner;
+        const cm=!countryFilter||rc.country===countryFilter;
+        const dm=(!rc.startDate||rc.startDate<=viewDate)&&(!rc.endDate||rc.endDate>=viewDate);
+        return km&&pm&&cm&&String(rc.zone)===z&&dm;
+      }).forEach(rc=>wuSetZ.add(rc.weight+'|'+rc.unit));
+      const td=state.rateData[combo.key];
+      if(td?.lbs?.[z])Object.keys(td.lbs[z]).forEach(w=>wuSetZ.add(w+'|LBS'));
+      if(td?.oz?.[z])Object.keys(td.oz[z]).forEach(w=>wuSetZ.add(w+'|OZ'));
+    });
+    let wuZ=[...wuSetZ].map(s=>{const[w,u]=s.split('|');return{w:+w,u};})
+      .sort((a,b)=>a.u==='OZ'&&b.u==='LBS'?-1:a.u==='LBS'&&b.u==='OZ'?1:a.w-b.w);
+    if(unitFilter!=='ALL')wuZ=wuZ.filter(r=>r.u===unitFilter);
+    wuZ.forEach(({w,u})=>allRows.push({z,w,u}));
   });
-  let allWU=[...wuSet].map(s=>{const[w,u]=s.split('|');return{w:+w,u};})
-    .sort((a,b)=>a.u==='OZ'&&b.u==='LBS'?-1:a.u==='LBS'&&b.u==='OZ'?1:a.w-b.w);
-  if(unitFilter!=='ALL')allWU=allWU.filter(r=>r.u===unitFilter);
 
   // Build comparison matrix
-  const matrix=allWU.map(({w,u})=>{
+  const matrix=allRows.map(({z,w,u})=>{
     const rates={};
     selCombos.forEach(combo=>{
-      const r=getRateWithDate(combo.key,zone,w,u,viewDate,combo.partner||null);
+      const r=getRateWithDate(combo.key,z,w,u,viewDate,combo.partner||null);
       rates[mkComboId(combo)]=r;
     });
     const allR=Object.values(rates).filter(r=>r!=null);
     const minRate=allR.length?Math.min(...allR):null;
-    return{w,u,rates,minRate};
+    return{z,w,u,rates,minRate};
   });
 
   // Build table HTML
@@ -1065,12 +1105,12 @@ function renderRates(){
     const pct=!isMin&&mn?((r-mn)/mn*100).toFixed(1):null;
     return'<td style="text-align:right;padding:6px 10px"><span class="mono" style="font-weight:'+(isMin?'700':'500')+';color:'+(isMin?'var(--teal)':'var(--text)')+'">$'+r.toFixed(2)+'</span>'+(pct?'<span style="font-size:10px;color:var(--red);margin-left:3px">+'+pct+'%</span>':'')+'</td>';
   };
-  const cmpHdr='<tr style="background:var(--surface2)"><th style="padding:9px 12px;text-align:left;font-size:11px;color:var(--text2)">Weight</th><th style="padding:9px 8px;text-align:left;font-size:11px;color:var(--text2)">Unit</th>'
+  const cmpHdr='<tr style="background:var(--surface2)"><th style="padding:9px 12px;text-align:left;font-size:11px;color:var(--text2)">Zone</th><th style="padding:9px 12px;text-align:left;font-size:11px;color:var(--text2)">Weight</th><th style="padding:9px 8px;text-align:left;font-size:11px;color:var(--text2)">Unit</th>'
     +selCombos.map(combo=>{const cl=CARRIERS.find(c=>c.key===combo.key);const sk=getServiceKeyInfo(combo.key);const color=cl?.color||sk?.color||'var(--text)';return'<th style="padding:9px 12px;text-align:right;font-size:11px;color:'+color+';font-weight:600">'+mkComboLabel(combo,true)+'</th>';}).join('')
     +'<th style="padding:9px 12px;text-align:left;font-size:11px;color:var(--teal);font-weight:600">Cheapest</th></tr>';
-  const cmpBody=matrix.map(({w,u,rates,minRate},i)=>{
+  const cmpBody=matrix.map(({z,w,u,rates,minRate},i)=>{
     const cheapC=selCombos.find(c=>rates[mkComboId(c)]===minRate&&minRate!=null);
-    return'<tr style="'+(i%2?'background:var(--surface2)':'')+'"><td class="mono" style="padding:6px 12px;font-weight:600">'+w+'</td><td style="padding:6px 8px">'+badge(u==='OZ'?'badge-orange':'badge-blue',u)+'</td>'
+    return'<tr style="'+(i%2?'background:var(--surface2)':'')+'"><td class="mono" style="padding:6px 12px;font-weight:600;color:var(--text2);font-size:11px">Z'+z+'</td><td class="mono" style="padding:6px 12px;font-weight:600">'+w+'</td><td style="padding:6px 8px">'+badge(u==='OZ'?'badge-orange':'badge-blue',u)+'</td>'
       +selCombos.map(c=>mkCell(rates[mkComboId(c)]??null,minRate)).join('')
       +'<td style="padding:6px 12px">'+(minRate!=null?'<span style="font-size:13px;font-weight:700;color:var(--teal)">$'+minRate.toFixed(2)+'</span><span style="font-size:11px;color:var(--text2);margin-left:6px">'+mkComboLabel(cheapC,true)+'</span>':'—')+'</td></tr>';
   }).join('');
@@ -1078,9 +1118,9 @@ function renderRates(){
   const tableContent=selCombos.length===0
     ?'<div style="text-align:center;padding:40px;color:var(--text2);font-size:14px">Select at least one combination above to compare rates.</div>'
     :matrix.length===0
-    ?'<div style="text-align:center;padding:40px;color:var(--text2)"><div style="font-size:14px">No rates for Zone '+zone+(countryFilter?' · '+countryFilter:'')+' with current filters.</div><div style="font-size:12px;margin-top:6px">Upload a rate card file or adjust zone / date filters.</div></div>'
+    ?'<div style="text-align:center;padding:40px;color:var(--text2)"><div style="font-size:14px">No rates for the selected zones'+(countryFilter?' · '+countryFilter:'')+' with current filters.</div><div style="font-size:12px;margin-top:6px">Upload a rate card file or adjust zone / date filters.</div></div>'
     :'<div style="overflow-x:auto"><table style="font-size:12px;width:100%;border-collapse:collapse;white-space:nowrap"><thead>'+cmpHdr+'</thead><tbody>'+cmpBody+'</tbody></table></div>'
-     +'<div style="margin-top:8px;font-size:12px;color:var(--text2)">'+matrix.length+' weight tiers &nbsp;&middot;&nbsp; Zone '+zone+' &nbsp;&middot;&nbsp; '+viewDate+(countryFilter?' &nbsp;&middot;&nbsp; '+countryFilter:'')+' &nbsp;&middot;&nbsp; <span style="color:var(--teal);font-weight:500">Teal = cheapest</span> &nbsp;<span style="color:var(--red)">+% = premium</span></div>';
+     +'<div style="margin-top:8px;font-size:12px;color:var(--text2)">'+matrix.length+' rows &nbsp;&middot;&nbsp; Zones '+selZones.slice().sort((a,b)=>+a-+b).join(', ')+' &nbsp;&middot;&nbsp; '+viewDate+(countryFilter?' &nbsp;&middot;&nbsp; '+countryFilter:'')+' &nbsp;&middot;&nbsp; <span style="color:var(--teal);font-weight:500">Teal = cheapest</span> &nbsp;<span style="color:var(--red)">+% = premium</span></div>';
 
   // Upload section
   const uploadSection=admin
@@ -1100,7 +1140,7 @@ function renderRates(){
     <div class="card">
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--border)">
         <div class="form-group" style="margin:0"><label class="lbl">Country</label><select class="inp" style="width:115px" onchange="window._rateCountry=this.value;renderRates()">${countryOpts}</select></div>
-        <div class="form-group" style="margin:0"><label class="lbl">Zone</label><select class="inp" style="width:90px" onchange="window._rateZone=this.value;renderRates()">${zoneOpts}</select></div>
+        <div class="form-group" style="margin:0"><label class="lbl">Zone</label>${zoneDropdownHtml(selZones)}</div>
         <div class="form-group" style="margin:0"><label class="lbl">Unit</label><select class="inp" style="width:80px" onchange="window._rateUnit=this.value;renderRates()"><option value="ALL"${unitFilter==='ALL'?' selected':''}>All</option><option value="LBS"${unitFilter==='LBS'?' selected':''}>LBS</option><option value="OZ"${unitFilter==='OZ'?' selected':''}>OZ</option></select></div>
         <div class="form-group" style="margin:0"><label class="lbl">DWS Date</label><input class="inp" type="date" style="width:148px" value="${viewDate}" onchange="window._rateViewDate=this.value;renderRates()"/></div>
       </div>
