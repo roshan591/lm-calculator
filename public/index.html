@@ -95,7 +95,21 @@ td.mono{font-family:var(--mono);font-size:12px}
 .role-admin{background:var(--blue-bg);color:var(--blue);border:1px solid #b3d4f0}
 .role-viewer{background:var(--surface2);color:var(--text2);border:1px solid var(--border)}
 @media(max-width:768px){.main{grid-template-columns:1fr}.sidebar{display:none}}
+html.dark{
+  --bg:#111318;--surface:#1a1d23;--surface2:#21252e;--border:#2c3040;--border2:#373d4d;
+  --text:#e2e5ed;--text2:#8b939f;--text3:#545c6b;
+  --blue:#38a0e0;--blue-bg:#0d2136;--teal:#2dd4bf;--teal-bg:#0d2926;
+  --green:#4ade80;--green-bg:#0d2015;--orange:#fbbf24;--orange-bg:#241a05;
+  --red:#f87171;--red-bg:#2a1010;--purple:#a78bfa;--purple-bg:#1e1535;
+}
+html.dark tr:hover td{background:rgba(255,255,255,.04)}
+html.dark .tab-pill.active{box-shadow:0 1px 3px rgba(0,0,0,.4)}
+html.dark .modal-overlay{background:rgba(0,0,0,.75)}
+html.dark .upload-zone:hover,html.dark .upload-zone.drag{background:var(--blue-bg)}
+.theme-toggle{width:36px;height:36px;border-radius:50%;border:1px solid var(--border2);background:var(--surface);cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--text2);transition:all .15s;flex-shrink:0}
+.theme-toggle:hover{background:var(--surface2);color:var(--text)}
 </style>
+<script>if(localStorage.getItem('lm_theme')==='dark')document.documentElement.classList.add('dark');</script>
 </head>
 <body>
 
@@ -126,7 +140,11 @@ td.mono{font-family:var(--mono);font-size:12px}
       <span class="header-title">Last Mile Calculator</span>
     </div>
     <span class="header-sub">Xindus Trade Networks</span>
-    <div id="session-info" style="margin-left:auto;display:flex;align-items:center;gap:8px"></div>
+    <button class="theme-toggle" id="theme-btn" onclick="toggleTheme()" title="Toggle dark / light mode">
+      <svg id="theme-icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+      <svg id="theme-icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
+    </button>
+    <div id="session-info" style="margin-left:0;display:flex;align-items:center;gap:8px"></div>
   </header>
 
   <div class="main">
@@ -1692,6 +1710,12 @@ function switchTab(el,tab){
   $(`#tab-${tab}`).style.display='';
   ({calculator:renderCalculator,rates:renderRates,rules:renderRules,zones:renderZones,analysis:renderAnalysis,surcharges:renderSurcharges,network:renderNetwork})[tab]?.();
 }
+function toggleTheme(){
+  const isDark=document.documentElement.classList.toggle('dark');
+  localStorage.setItem('lm_theme',isDark?'dark':'light');
+  document.getElementById('theme-icon-sun').style.display=isDark?'':'none';
+  document.getElementById('theme-icon-moon').style.display=isDark?'none':'';
+}
 function navTo(tab,setupFn){
   const navEl=document.querySelector('.nav-item[data-tab="'+tab+'"]');
   if(setupFn)setupFn();
@@ -1806,6 +1830,7 @@ function runCalcUI(){
 // INIT
 // ═══════════════════════════════════════════════════
 document.addEventListener('click',function(e){if(!e.target.closest('[id^="combo-dd-"]'))document.querySelectorAll('[id^="combo-dd-panel-"]').forEach(p=>p.style.display='none');});
+(function(){const isDark=document.documentElement.classList.contains('dark');document.getElementById('theme-icon-sun').style.display=isDark?'':'none';document.getElementById('theme-icon-moon').style.display=isDark?'none':'';})();
 initSession();
 renderCalculator();
 </script>
